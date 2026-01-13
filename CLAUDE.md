@@ -89,4 +89,4 @@ NeuroMemory/
 └── qdrant_data/       # Qdrant 数据持久化
 ```
 
-详细架构设计参见 `架构文档.md`。
+详细架构设计参见 `docs/ARCHITECTURE.md`。
