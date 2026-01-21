@@ -45,16 +45,18 @@
 
 ### 认知流程
 
-1. **混合检索 (Hybrid Retrieval)**: 并行执行向量搜索和图谱遍历
-2. **深度推理 (System 2 Thinking)**: LLM 基于知识网络进行多跳推理
-3. **记忆整合 (Consolidation)**: 自动提取实体关系并更新图谱
+1. **预处理 (Preprocessing)**: 身份提取 + 代词消解（"我的儿子" → "小朱的儿子"）
+2. **意图判断 (Intent Classification)**: LLM 判断 personal/factual/general 意图
+3. **混合检索 (Hybrid Retrieval)**: 并行执行向量搜索和图谱遍历
+4. **深度推理 (System 2 Thinking)**: LLM 基于知识网络进行多跳推理
+5. **异步记忆整合 (Async Consolidation)**: 后台线程池异步执行，用户无需等待
 
 ## 技术栈
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
 | LLM | DeepSeek / Gemini | 可切换，用于推理和实体提取 |
-| Embedding | HuggingFace / Gemini / SiliconFlow | 可切换，384/512/768 维向量 |
+| Embedding | HuggingFace / Gemini / SiliconFlow | 可切换，384/768/1024 维向量 |
 | Vector DB | Qdrant | 高性能向量数据库 |
 | Graph DB | Neo4j 5.26.0 | 知识图谱存储 |
 | Framework | Mem0 + LangChain | 混合记忆管理 |
@@ -144,7 +146,7 @@ ENABLE_GRAPH_STORE = True
 | 配置 | Local | SiliconFlow | Gemini |
 |------|-------|-------------|--------|
 | Embedding 模型 | paraphrase-multilingual-MiniLM-L12-v2 | BAAI/bge-m3 | text-embedding-004 |
-| 向量维度 | 384 | 512 | 768 |
+| 向量维度 | 384 | 1024 | 768 |
 
 ## 使用示例
 

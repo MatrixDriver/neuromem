@@ -16,17 +16,20 @@
 
 ```
 Collection: neuro_memory_{provider}_{dims}
-例如: neuro_memory_huggingface_384
+例如: 
+  - neuro_memory_huggingface_384  (本地 HuggingFace)
+  - neuro_memory_gemini_768       (Google Gemini)
+  - neuro_memory_openai_1024      (SiliconFlow bge-m3)
 
 Document Schema:
 ┌─────────────────────────────────────────────────────────────────┐
 │  {                                                              │
 │    "id": "uuid-v4",                                             │
-│    "vector": [0.12, -0.34, ...],  // 384 或 768 维              │
+│    "vector": [0.12, -0.34, ...],  // 384/768/1024 维            │
 │    "payload": {                                                 │
 │      "memory": "DeepMind 是 Google 的子公司",                    │
 │      "user_id": "user_001",                                     │
-│      "created_at": "2025-01-12T10:00:00Z",                      │
+│      "created_at": "2026-01-12T10:00:00Z",                      │
 │      "metadata": { ... }                                        │
 │    }                                                            │
 │  }                                                              │
@@ -38,11 +41,19 @@ Document Schema:
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `id` | UUID | 记忆唯一标识 |
-| `vector` | float[] | 嵌入向量 (384/768 维) |
+| `vector` | float[] | 嵌入向量 (384/768/1024 维) |
 | `payload.memory` | string | 原始文本内容 |
 | `payload.user_id` | string | 用户标识 |
 | `payload.created_at` | datetime | 创建时间 |
 | `payload.metadata` | object | 可选扩展元数据 |
+
+### Embedding 维度对照
+
+| 提供商 | 模型 | 维度 |
+|--------|------|------|
+| Local (HuggingFace) | paraphrase-multilingual-MiniLM-L12-v2 | 384 |
+| Gemini | text-embedding-004 | 768 |
+| SiliconFlow | BAAI/bge-m3 | 1024 |
 
 ---
 

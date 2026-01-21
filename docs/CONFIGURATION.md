@@ -22,8 +22,13 @@
 |--------|------|--------|------|
 | `DEEPSEEK_API_KEY` | 是* | - | DeepSeek API 密钥 |
 | `GOOGLE_API_KEY` | 是* | - | Google Gemini API 密钥 |
+| `SILICONFLOW_API_KEY` | 是* | - | SiliconFlow API 密钥（用于 bge-m3 Embedding） |
 
 > \* 根据 `LLM_PROVIDER` 和 `EMBEDDING_PROVIDER` 设置，至少需要其中一个
+>
+> - 使用 DeepSeek LLM: 需要 `DEEPSEEK_API_KEY`
+> - 使用 Gemini LLM/Embedding: 需要 `GOOGLE_API_KEY`
+> - 使用 SiliconFlow Embedding: 需要 `SILICONFLOW_API_KEY`
 
 ---
 
@@ -36,7 +41,7 @@
 LLM_PROVIDER = "deepseek"  # 可选: "deepseek" | "gemini"
 
 # Embedding 提供商选择
-EMBEDDING_PROVIDER = "local"  # 可选: "local" | "gemini"
+EMBEDDING_PROVIDER = "siliconflow"  # 可选: "local" | "gemini" | "siliconflow"
 
 # 图谱存储开关
 ENABLE_GRAPH_STORE = True  # True: 启用 Neo4j | False: 仅向量存储
@@ -60,7 +65,22 @@ ENABLE_GRAPH_STORE = True  # True: 启用 Neo4j | False: 仅向量存储
 | 提供商 | 模型 | 维度 | 说明 |
 |--------|------|------|------|
 | Local (HuggingFace) | paraphrase-multilingual-MiniLM-L12-v2 | 384 | 本地运行，无 API 成本 |
-| Gemini | text-embedding-004 | 768 | 云端 API，更高精度 |
+| Gemini | text-embedding-004 | 768 | Google 云端 API |
+| SiliconFlow | BAAI/bge-m3 | 1024 | 国内云端，高精度，OpenAI 兼容接口 |
+
+### SiliconFlow 配置详情
+
+```python
+SILICONFLOW_EMBEDDING_CONFIG = {
+    "provider": "openai",  # 使用 OpenAI 兼容接口
+    "config": {
+        "model": "BAAI/bge-m3",
+        "embedding_dims": 1024,
+        "openai_base_url": "https://api.siliconflow.cn/v1",
+        "api_key": SILICONFLOW_API_KEY,
+    },
+}
+```
 
 ---
 
@@ -107,8 +127,11 @@ neuro_memory_{provider}_{dims}
 示例：
 - 本地 HuggingFace: `neuro_memory_huggingface_384`
 - Gemini: `neuro_memory_gemini_768`
+- SiliconFlow (bge-m3): `neuro_memory_openai_1024`
 
 > 这确保了不同 Embedding 模型的向量不会混在同一个 Collection 中
+>
+> 注意：SiliconFlow 使用 OpenAI 兼容接口，因此 provider 名称为 `openai`
 
 ---
 
