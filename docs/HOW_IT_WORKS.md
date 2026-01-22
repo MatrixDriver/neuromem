@@ -180,10 +180,6 @@ graph TD
     XZ -->|有孩子| SS
     XZ -->|女儿| CC
     CC -->|弟弟| SS
-
-    style XZ fill:#e1f5fe
-    style CC fill:#fff3e0
-    style SS fill:#e8f5e9
 ```
 
 ### 图谱中的隐含知识
@@ -315,39 +311,29 @@ sequenceDiagram
 
     U->>C: "小朱的儿子叫什么？"
 
-    rect rgb(240, 248, 255)
-        Note over C,P: Phase 0: 预处理
-        C->>P: extract_user_identity()
-        C->>P: resolve_pronouns()
-        P-->>C: resolved_input
-    end
+    Note over C,P: Phase 0: 预处理
+    C->>P: extract_user_identity()
+    C->>P: resolve_pronouns()
+    P-->>C: resolved_input
 
-    rect rgb(255, 248, 240)
-        Note over C,I: Phase 1: 意图判断
-        C->>I: classify_intent()
-        I-->>C: IntentResult(personal)
-    end
+    Note over C,I: Phase 1: 意图判断
+    C->>I: classify_intent()
+    I-->>C: IntentResult personal
 
-    rect rgb(240, 255, 240)
-        Note over C,S: Phase 2: 混合检索
-        C->>S: brain.search()
-        Note right of S: Qdrant + Neo4j 并行
-        S-->>C: 向量记忆 + 图谱关系
-    end
+    Note over C,S: Phase 2: 混合检索
+    C->>S: brain.search()
+    Note right of S: Qdrant + Neo4j 并行
+    S-->>C: 向量记忆 + 图谱关系
 
-    rect rgb(255, 240, 255)
-        Note over C,L: Phase 3: 深度推理
-        C->>L: LLM.invoke(知识上下文)
-        L-->>C: "帅帅"
-    end
+    Note over C,L: Phase 3: 深度推理
+    C->>L: LLM.invoke 知识上下文
+    L-->>C: "帅帅"
 
     C-->>U: 立即返回答案
 
-    rect rgb(245, 245, 245)
-        Note over C,M: Phase 4: 异步整合
-        C--)M: executor.submit()
-        Note right of M: 后台存储，约28s
-    end
+    Note over C,M: Phase 4: 异步整合
+    C--)M: executor.submit()
+    Note right of M: 后台存储 约28s
 ```
 
 ### 各阶段耗时统计
@@ -405,6 +391,7 @@ answer = cognitive_process(brain, "小朱的儿子叫什么名字？", user_id="
 | 文档 | 说明 |
 |------|------|
 | [主架构文档](ARCHITECTURE.md) | 系统整体架构设计 |
+| [Mem0 深度解析](MEM0_DEEP_DIVE.md) | Mem0 框架原理、API 详解 |
 | [核心组件](COMPONENTS.md) | 各组件技术细节 |
 | [配置参考](CONFIGURATION.md) | 环境变量、模型切换 |
 | [接口设计](API.md) | Python SDK、REST API |

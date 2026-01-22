@@ -1,77 +1,29 @@
 """
-NeuroMemory 主程序
-神经符号混合记忆系统 - 核心认知流程实现
-"""
-# 预加载 openai 模块，避免并发导入死锁
-import openai.resources.embeddings  # noqa: F401
+NeuroMemory 主程序（v2）
+命令行演示工具 - 基于 PrivateBrain 的 Y 型分流架构
 
-import logging
-from concurrent.futures import ThreadPoolExecutor
+v2 架构核心：
+- 只检索，不推理（推理交给调用方的主 LLM）
+- 隐私过滤：PRIVATE 数据存储，PUBLIC 数据丢弃
+- Y 型分流：同步返回检索结果，异步执行存储决策
+"""
+import re
 from typing import Literal
 
 from pydantic import BaseModel
-from mem0 import Memory
 
 from config import (
-    MEM0_CONFIG,
     LLM_PROVIDER,
     EMBEDDING_PROVIDER,
     DEEPSEEK_API_KEY,
     DEEPSEEK_CONFIG,
-    get_chat_config,
 )
-
-
-# =============================================================================
-# 异步记忆整合模块
-# =============================================================================
-
-# 配置后台整合日志记录器
-_consolidation_logger = logging.getLogger("neuro_memory.consolidation")
-_consolidation_logger.setLevel(logging.INFO)
-if not _consolidation_logger.handlers:
-    _handler = logging.StreamHandler()
-    _handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s"))
-    _consolidation_logger.addHandler(_handler)
-
-# 后台整合线程池（max_workers=2 确保不会积压太多任务）
-_consolidation_executor = ThreadPoolExecutor(
-    max_workers=2,
-    thread_name_prefix="mem_consolidate"
-)
-
-
-def _background_consolidate(brain: Memory, texts: list[str], user_id: str) -> None:
-    """
-    后台执行记忆整合（异步，不阻塞主流程）
-    
-    Args:
-        brain: Memory 实例
-        texts: 需要存储的文本列表
-        user_id: 用户标识
-    """
-    import time
-    start = time.perf_counter()
-    success_count = 0
-    
-    for text in texts:
-        try:
-            brain.add(text, user_id=user_id)
-            success_count += 1
-        except Exception as e:
-            _consolidation_logger.warning(f"记忆保存失败: {e}")
-    
-    elapsed = time.perf_counter() - start
-    _consolidation_logger.info(
-        f"记忆整合完成: {success_count}/{len(texts)} 条成功, 耗时 {elapsed:.2f}s"
-    )
+from private_brain import PrivateBrain, debug_process_memory
 
 
 # =============================================================================
 # 代词消解模块 (Coreference Resolution)
 # =============================================================================
-
-import re
 
 # 用户身份上下文（可扩展为持久化存储）
 USER_IDENTITY_CACHE: dict[str, dict] = {}
@@ -142,84 +94,7 @@ def resolve_pronouns(user_input: str, user_id: str) -> str:
 
 
 # =============================================================================
-# 图谱关系处理模块
-# =============================================================================
-
-# 关系类型映射（英文 → 中文）
-RELATION_NORMALIZE_MAP = {
-    "daughter": "女儿",
-    "son": "儿子",
-    "has": "有",
-    "has_name": "名字",
-    "has_daughter": "有女儿",
-    "has_son": "有儿子",
-    "brother": "弟弟",
-    "sister": "姐妹",
-    "father": "父亲",
-    "mother": "母亲",
-    "parent": "父母",
-    "child": "孩子",
-    "name": "名字",
-    "states_that": "陈述",
-    "responds_to_query_about": "回应查询",
-}
-
-
-def normalize_relation_type(rel_type: str) -> str:
-    """
-    归一化关系类型（英文 → 中文）
-    
-    Args:
-        rel_type: 原始关系类型
-        
-    Returns:
-        归一化后的关系类型
-    """
-    return RELATION_NORMALIZE_MAP.get(rel_type.lower(), rel_type)
-
-
-def dedupe_relations(relations: list) -> list:
-    """
-    对图谱关系进行去重
-    
-    Args:
-        relations: 原始关系列表
-        
-    Returns:
-        去重后的关系列表
-    """
-    seen = set()
-    deduped = []
-    for rel in relations:
-        # 生成唯一键
-        if isinstance(rel, dict):
-            source = rel.get("source", "?")
-            relationship = rel.get("relationship", "?")
-            target = rel.get("target", "?")
-            
-            # 处理嵌套字典格式
-            if isinstance(source, dict):
-                source = source.get("name", source.get("id", "?"))
-            if isinstance(relationship, dict):
-                relationship = relationship.get("type", relationship.get("name", "?"))
-            if isinstance(target, dict):
-                target = target.get("name", target.get("id", "?"))
-            
-            # 归一化关系类型
-            relationship = normalize_relation_type(str(relationship))
-            
-            key = f"{source}|{relationship}|{target}"
-        else:
-            key = str(rel)
-        
-        if key not in seen:
-            seen.add(key)
-            deduped.append(rel)
-    return deduped
-
-
-# =============================================================================
-# 意图判断模块
+# 意图判断模块（仅用于演示输出）
 # =============================================================================
 
 class IntentResult(BaseModel):
@@ -242,7 +117,6 @@ def classify_intent(user_input: str) -> IntentResult:
         IntentResult: 包含意图类型、推理过程和是否需要外部搜索的结构化结果
     """
     import json
-    import re
     from langchain_openai import ChatOpenAI
     
     llm = ChatOpenAI(
@@ -309,255 +183,147 @@ def classify_intent(user_input: str) -> IntentResult:
 
 
 # =============================================================================
-# LLM 工厂
+# 演示函数
 # =============================================================================
 
-
-def create_chat_llm():
-    """根据配置创建对话 LLM 实例"""
-    chat_config = get_chat_config()
-
-    if chat_config["provider"] == "gemini":
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(
-            model=chat_config["model"],
-            temperature=chat_config["temperature"],
-        )
-    elif chat_config["provider"] == "openai":
-        from langchain_openai import ChatOpenAI
-        return ChatOpenAI(
-            model=chat_config["model"],
-            temperature=chat_config["temperature"],
-            base_url=chat_config["base_url"],
-        )
-    else:
-        raise ValueError(f"未知的 LLM 提供商: {chat_config['provider']}")
-
-
-def create_brain() -> Memory:
-    """初始化混合记忆系统"""
-    return Memory.from_config(MEM0_CONFIG)
-
-
-def cognitive_process(
-    brain: Memory,
-    user_input: str,
-    user_id: str = "default_user",
-) -> str:
+def demo_v2_architecture():
     """
-    核心认知流程
-
-    Args:
-        brain: Memory 实例
-        user_input: 用户输入
-        user_id: 用户标识
-
-    Returns:
-        AI 生成的回答
+    演示 v2 架构：Y 型分流 + 隐私过滤
+    
+    展示：
+    1. 私有数据被正确存储
+    2. 公共知识被丢弃
+    3. 检索返回结构化 JSON
     """
-    import time
+    print("=" * 60)
+    print("NeuroMemory v2 架构演示")
+    print(f"当前配置: LLM={LLM_PROVIDER}, Embedding={EMBEDDING_PROVIDER}")
+    print("=" * 60)
     
-    # 性能统计
-    timings: dict[str, float] = {}
-    total_start = time.perf_counter()
+    brain = PrivateBrain()
+    user_id = "demo_user"
     
-    print(f"\n[输入] {user_input}")
-
-    # Step 0.5: 提取用户身份（如果有）
-    step_start = time.perf_counter()
-    extract_user_identity(user_input, user_id)
+    # 演示场景 1: 私有数据（应该存储）
+    print("\n" + "=" * 60)
+    print("场景 1: 私有数据（个人信息 - 应该存储）")
+    print("=" * 60)
     
-    # Step 0.6: 代词消解（用于存储和检索）
-    resolved_input = resolve_pronouns(user_input, user_id)
-    if resolved_input != user_input:
-        print(f"[代词消解] {user_input} -> {resolved_input}")
-    timings["预处理(身份+消解)"] = time.perf_counter() - step_start
-
-    # Step 0: 意图判断 (Intent Classification)
-    step_start = time.perf_counter()
-    intent_result = classify_intent(resolved_input)
-    timings["意图判断(LLM)"] = time.perf_counter() - step_start
-    print(f"[意图分析] 类型: {intent_result.intent}")
-    print(f"[意图分析] 推理: {intent_result.reasoning}")
-    print(f"[意图分析] 需要外部搜索: {intent_result.needs_external_search}")
-
-    # Step 1: 混合检索 (Hybrid Retrieval) - 使用消解后的输入
-    step_start = time.perf_counter()
-    search_results = brain.search(resolved_input, user_id=user_id)
-    timings["混合检索(Vector+Graph)"] = time.perf_counter() - step_start
-
-    # 调试: 打印原始返回结构
-    print(f"[调试] search_results 类型: {type(search_results).__name__}")
-    if isinstance(search_results, dict):
-        print(f"[调试] search_results keys: {list(search_results.keys())}")
-
-    knowledge_context = ""
-    vector_memories = []
-    graph_relations = []
-
-    # 处理返回格式：graph_store 启用时返回字典，否则返回列表
-    if isinstance(search_results, dict):
-        vector_memories = search_results.get("results", [])
-        graph_relations = search_results.get("relations", [])
-    elif isinstance(search_results, list):
-        vector_memories = search_results
-
-    # 处理向量记忆
-    if vector_memories:
-        print("[海马体] 激活记忆:")
-        for mem in vector_memories:
-            if isinstance(mem, dict):
-                memory_text = mem.get("memory", str(mem))
-                score = mem.get("score", "N/A")
-            else:
-                memory_text = str(mem)
-                score = "N/A"
-            print(f"  - [vector] {memory_text} (score: {score})")
-            knowledge_context += f"- {memory_text}\n"
-    else:
-        print("[海马体] 暂无相关向量记忆")
-
-    # 处理图谱关系（先去重）
-    if graph_relations:
-        graph_relations = dedupe_relations(graph_relations)
-        print("[图谱] 关联关系:")
-        for rel in graph_relations:
-            # 兼容不同的关系数据结构
-            if isinstance(rel, dict):
-                source = rel.get("source", "?")
-                relationship = rel.get("relationship", "?")
-                target = rel.get("target", "?")
-                
-                # 兼容字符串和字典两种格式
-                if isinstance(source, dict):
-                    source_name = source.get("name", source.get("id", "?"))
-                else:
-                    source_name = str(source)
-                
-                if isinstance(relationship, dict):
-                    rel_type = relationship.get("type", relationship.get("name", "?"))
-                else:
-                    rel_type = str(relationship)
-                
-                # 归一化关系类型（英文 → 中文）
-                rel_type = normalize_relation_type(rel_type)
-                
-                if isinstance(target, dict):
-                    target_name = target.get("name", target.get("id", "?"))
-                else:
-                    target_name = str(target)
-                
-                relation_str = f"{source_name} --[{rel_type}]--> {target_name}"
-            else:
-                relation_str = str(rel)
-            
-            print(f"  - [graph] {relation_str}")
-            knowledge_context += f"- 关系: {relation_str}\n"
-
-    # Step 2: 深度推理 (System 2 Thinking)
-    step_start = time.perf_counter()
-    llm = create_chat_llm()
-
-    # 构建用户身份上下文
-    identity = USER_IDENTITY_CACHE.get(user_id, {})
-    current_user_name = identity.get("name")
-    identity_context = ""
-    if current_user_name:
-        identity_context = f"""[用户身份]
-当前用户的名字是: {current_user_name}
-重要：在知识网络中，"我" 等同于 "{current_user_name}"
-
-"""
-
-    system_prompt = f"""你是一个拥有"图谱思维"的超级智能，擅长从碎片化信息中进行深度语义推理。
-
-{identity_context}[已提取的知识网络]
-{knowledge_context if knowledge_context else "(暂无相关记忆)"}
-
-[推理指导]
-在回答问题时，请进行多层语义分析：
-
-1. **词汇语义分析**：注意词汇的隐含语义
-   - 许多词汇自带属性信息（如"弟弟"暗示男性，"女儿"暗示女性，"外婆"暗示女性且是母亲的母亲）
-   - 先识别这些隐含属性，再进行推理
-   - 职业、称谓、关系词都可能包含隐含信息
-
-2. **关系传递推理**：
-   - 识别具有传递性的关系
-   - 例如：A 是 B 的兄弟姐妹 + B 是 C 的孩子 → A 也是 C 的孩子
-   - 例如：A 是 B 的弟弟 → A 是男性 → 如果 A 是 C 的孩子 → A 是 C 的儿子
-
-3. **推理步骤显式化**：
-   - 先列出所有相关事实
-   - 逐步推导，展示完整的推理链条
-   - 从隐含属性得出具体结论
-
-[指令]
-1. 严格基于知识网络，不编造信息
-2. 知识中的"我"指用户"{current_user_name if current_user_name else "用户"}"
-3. 遇到问题时，先分析相关实体的隐含属性，再进行多跳推理
-4. 展示推理链条，让结论有据可循
-5. 如果确实无法确定，说明缺少哪些关键信息
-"""
-
-    response = llm.invoke([("system", system_prompt), ("user", user_input)])
-    answer = response.content
-    timings["深度推理(LLM)"] = time.perf_counter() - step_start
-
-    print(f"[前额叶] 生成回答:\n{answer}")
-
-    # Step 3: 记忆整合 (Consolidation) - 异步执行，不阻塞主流程
-    texts_to_consolidate = [
-        resolved_input,
-        f"针对'{resolved_input}'的回答是: {answer}"
+    private_data = [
+        "我的名字叫小朱",
+        "小朱有两个孩子",
+        "灿灿是小朱的女儿",
+        "灿灿还有一个弟弟，叫帅帅",
     ]
-    _consolidation_executor.submit(
-        _background_consolidate,
-        brain,
-        texts_to_consolidate,
-        user_id
-    )
-    print("[后台] 记忆整合已提交（异步执行中）...")
-
-    # 打印性能统计（用户感知耗时，不包含记忆整合）
-    total_time = time.perf_counter() - total_start
-    print(f"\n[性能统计] 用户感知耗时: {total_time:.2f}s")
-    for step_name, step_time in timings.items():
-        percentage = (step_time / total_time) * 100
-        print(f"  - {step_name}: {step_time:.2f}s ({percentage:.1f}%)")
-    print(f"  - 记忆整合: 异步执行中（约 28s，不阻塞用户）")
-
-    return answer
+    
+    for text in private_data:
+        print(f"\n>>> 输入: {text}")
+        result = brain.process_debug(text, user_id)
+        print(result)
+    
+    # 演示场景 2: 公共知识（应该丢弃）
+    print("\n" + "=" * 60)
+    print("场景 2: 公共知识（应该丢弃，不存储）")
+    print("=" * 60)
+    
+    public_data = [
+        "北京是中国的首都",
+        "Python 是一种编程语言",
+    ]
+    
+    for text in public_data:
+        print(f"\n>>> 输入: {text}")
+        result = brain.process_debug(text, user_id)
+        print(result)
+    
+    # 演示场景 3: 查询（只检索，不存储）
+    print("\n" + "=" * 60)
+    print("场景 3: 查询（只检索，不存储查询本身）")
+    print("=" * 60)
+    
+    queries = [
+        "小朱的儿子叫什么名字？",
+        "灿灿有弟弟吗？",
+    ]
+    
+    for query in queries:
+        print(f"\n>>> 查询: {query}")
+        result = brain.process_debug(query, user_id)
+        print(result)
+    
+    # 演示场景 4: 生产模式（JSON 输出）
+    print("\n" + "=" * 60)
+    print("场景 4: 生产模式（结构化 JSON 输出）")
+    print("=" * 60)
+    
+    import json
+    
+    print(f"\n>>> 查询: 小朱有几个孩子？")
+    json_result = brain.process("小朱有几个孩子？", user_id)
+    print(json.dumps(json_result, ensure_ascii=False, indent=2))
 
 
 def demo_multi_hop_reasoning():
-    """演示多跳推理能力"""
-    print("=" * 50)
-    print("NeuroMemory 多跳推理演示")
+    """
+    演示多跳推理能力（v2 版本）
+    
+    注意：v2 架构中，NeuroMemory 只负责检索，不做推理。
+    此演示展示检索结果，推理由调用方完成。
+    """
+    print("=" * 60)
+    print("NeuroMemory v2 多跳检索演示")
     print(f"当前配置: LLM={LLM_PROVIDER}, Embedding={EMBEDDING_PROVIDER}")
-    print("=" * 50)
-
-    brain = create_brain()
+    print("=" * 60)
+    print("\n注意：v2 架构中，NeuroMemory 只负责检索，不做推理。")
+    print("以下展示检索结果，推理应由调用方的主 LLM 完成。")
+    
+    brain = PrivateBrain()
     user_id = "demo_user"
-
-    # 注入碎片化信息
-    print("\n--- 正在构建初始记忆 ---")
-    # cognitive_process(brain, "DeepMind 是 Google 的子公司。", user_id)
-    # cognitive_process(brain, "Demis Hassabis 是 DeepMind 的 CEO。", user_id)
-    # cognitive_process(brain, "Gemini 是 DeepMind 团队研发的。", user_id)
-
-    cognitive_process(brain, "我的名字叫小朱", user_id)
-    cognitive_process(brain, "小朱有两个孩子", user_id)
-    cognitive_process(brain, "灿灿是小朱的女儿", user_id)
-    cognitive_process(brain, "灿灿还有一个弟弟，叫帅帅", user_id)
-
-
-    print("\n" + "=" * 50)
-
-    # 测试多跳推理
-    print("\n--- 测试推理能力 ---")
-    cognitive_process(brain, "小朱的儿子叫什么名字？", user_id)
+    
+    # 构建私有记忆
+    print("\n" + "-" * 40)
+    print("阶段 1: 构建私有记忆")
+    print("-" * 40)
+    
+    memories = [
+        "我的名字叫小朱",
+        "小朱有两个孩子",
+        "灿灿是小朱的女儿",
+        "灿灿还有一个弟弟，叫帅帅",
+    ]
+    
+    for text in memories:
+        print(f"\n>>> 存储: {text}")
+        # 使用 debug 模式查看存储决策
+        result = brain.process_debug(text, user_id)
+        print(result)
+    
+    # 等待异步存储完成
+    import time
+    print("\n[等待异步存储完成...]")
+    time.sleep(3)
+    
+    # 测试检索
+    print("\n" + "-" * 40)
+    print("阶段 2: 测试检索能力")
+    print("-" * 40)
+    
+    query = "小朱的儿子叫什么名字？"
+    print(f"\n>>> 查询: {query}")
+    result = brain.process_debug(query, user_id)
+    print(result)
+    
+    print("\n" + "-" * 40)
+    print("提示：根据检索到的信息，调用方 LLM 应能推理出：")
+    print("  - 帅帅是灿灿的弟弟（弟弟 = 男性）")
+    print("  - 灿灿是小朱的女儿（灿灿是小朱的孩子）")
+    print("  - 帅帅是灿灿的弟弟 + 灿灿是小朱的孩子 → 帅帅是小朱的孩子")
+    print("  - 帅帅是男性 + 帅帅是小朱的孩子 → 帅帅是小朱的儿子")
+    print("-" * 40)
 
 
 if __name__ == "__main__":
-    demo_multi_hop_reasoning()
+    # 默认运行 v2 架构演示
+    demo_v2_architecture()
+    
+    # 也可以运行多跳检索演示
+    # demo_multi_hop_reasoning()

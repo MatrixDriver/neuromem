@@ -184,3 +184,13 @@ _chat_config = get_chat_config()
 CHAT_MODEL = _chat_config["model"]
 CHAT_TEMPERATURE = _chat_config["temperature"]
 DEEPSEEK_BASE_URL = DEEPSEEK_CONFIG["base_url"]
+
+# =============================================================================
+# HTTP Server 配置
+# =============================================================================
+
+HTTP_SERVER_CONFIG = {
+    "host": os.getenv("HTTP_HOST", "0.0.0.0"),
+    "port": int(os.getenv("HTTP_PORT", "8765")),
+    "cors_origins": ["*"],  # DIFY 等跨域调用，生产环境建议限制具体域名
+}

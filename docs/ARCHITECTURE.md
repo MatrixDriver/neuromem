@@ -18,9 +18,11 @@
 | [数据模型](DATA_MODEL.md) | 向量存储、图谱存储、用户隔离 |
 | [核心组件](COMPONENTS.md) | 配置模块、认知引擎、Mem0 集成 |
 | [Mem0 深度解析](MEM0_DEEP_DIVE.md) | Mem0 框架原理、API 详解、价值分析 |
+| [测试指南](TESTING.md) | pytest 测试套件、运行方法、测试示例 |
 | [部署架构](DEPLOYMENT.md) | 本地开发、生产部署 |
 | [可观测性](OBSERVABILITY.md) | Metrics、Tracing、Logging |
 | [技术决策](ADR.md) | 架构决策记录 (ADR) |
+| [v2.0 架构设计](ARCHITECTURE_V2.md) | 下一版本架构规划（MCP Server、隐私过滤） |
 
 ---
 

@@ -142,6 +142,7 @@ print(answer)
 
 ## 下一步
 
+- [测试指南](TESTING.md) - 运行测试套件，验证系统功能
 - [配置参考](CONFIGURATION.md) - 了解模型切换和数据库配置
 - [接口设计](API.md) - 查看完整 API 文档
 - [部署架构](DEPLOYMENT.md) - 了解部署选项

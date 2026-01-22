@@ -10,4 +10,22 @@ dependencies = [
     "langchain-openai==1.1.7",
     "mem0ai[graph]>=1.0.2",
     "python-dotenv==1.2.1",
+    # HTTP Server 依赖
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.setuptools]
+# 不自动发现包，因为这是一个脚本项目而非库
+py-modules = []
+packages = ["tests"]
+
+[tool.pytest.ini_options]
+# 默认显示 print 输出，便于观察测试过程
+addopts = "-v -s"
+testpaths = ["tests"]
