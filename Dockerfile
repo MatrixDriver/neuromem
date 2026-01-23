@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock ./
 
 # 安装依赖（不包含 dev 依赖，减小镜像体积）
-RUN uv pip install --no-cache-dir -e .
+RUN uv pip install --system --no-cache-dir -e .
 
 # 运行阶段
 FROM python:3.13-slim
