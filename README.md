@@ -112,7 +112,7 @@ docker-compose up -d
 
 服务启动后：
 - Neo4j Browser: http://localhost:7474 (用户名: `neo4j`, 密码: `password123`)
-- Qdrant API: http://localhost:6333
+- Qdrant API: http://localhost:6400
 
 ### 6. 运行演示
 

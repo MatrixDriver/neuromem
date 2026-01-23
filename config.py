@@ -135,7 +135,7 @@ MEM0_CONFIG: dict = {
         "provider": "qdrant",
         "config": {
             "host": "localhost",
-            "port": 6333,
+            "port": 6400,  # 使用 6400 避免 Windows 保留端口冲突（6333 在保留范围 6296-6395 内）
             "collection_name": _get_collection_name(),
             "embedding_model_dims": _get_embedder_config()["config"]["embedding_dims"],  # 明确指定向量维度
         },
@@ -156,8 +156,36 @@ if ENABLE_GRAPH_STORE:
     }
 
 # =============================================================================
-# 对话 LLM 配置 (供 main.py 使用)
+# 对话 LLM 配置 (供 main.py、private_brain.ask 等使用)
 # =============================================================================
+
+
+def create_chat_llm():
+    """
+    根据 get_chat_config() 创建对话用 LLM 实例。
+    与 coreference._create_coreference_llm 模式一致，供 ask、main 等使用。
+    """
+    from langchain_openai import ChatOpenAI
+
+    cfg = get_chat_config()
+    model = cfg["model"]
+    temperature = cfg.get("temperature", 0.7)
+    provider = cfg.get("provider", "openai")
+    if provider == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        return ChatGoogleGenerativeAI(
+            model=model,
+            temperature=temperature,
+            google_api_key=GOOGLE_API_KEY or None,
+        )
+    return ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        base_url=cfg.get("base_url") or DEEPSEEK_CONFIG["base_url"],
+        api_key=DEEPSEEK_API_KEY or os.getenv("OPENAI_API_KEY"),
+    )
+
 
 def get_chat_config() -> dict:
     """获取当前对话 LLM 的配置"""
@@ -194,3 +222,27 @@ HTTP_SERVER_CONFIG = {
     "port": int(os.getenv("HTTP_PORT", "8765")),
     "cors_origins": ["*"],  # DIFY 等跨域调用，生产环境建议限制具体域名
 }
+
+# =============================================================================
+# Session 管理配置
+# =============================================================================
+
+# Session 超时时间（秒），超过此时间无活动自动结束
+# 可通过环境变量 SESSION_TIMEOUT 覆盖
+SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT", 30 * 60))  # 默认 30 分钟
+
+# Session 最大存活时间（秒），即使持续活跃也会强制结束
+SESSION_MAX_DURATION_SECONDS = int(os.getenv("SESSION_MAX_DURATION", 24 * 60 * 60))  # 默认 24 小时
+
+# 单个 Session 最大事件数，超过后自动结束并整合
+SESSION_MAX_EVENTS = int(os.getenv("SESSION_MAX_EVENTS", 100))
+
+# Session 超时检查间隔（秒）
+SESSION_CHECK_INTERVAL_SECONDS = 60  # 每分钟检查一次
+
+# =============================================================================
+# 指代消解配置
+# =============================================================================
+
+# 检索时用于消解的最近事件数
+COREFERENCE_CONTEXT_SIZE = int(os.getenv("COREFERENCE_CONTEXT_SIZE", 5))  # 默认最近 5 条

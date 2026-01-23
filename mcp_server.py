@@ -33,6 +33,7 @@ except ImportError:
     sys.exit(1)
 
 from private_brain import get_brain
+from session_manager import get_session_manager
 
 # 创建 MCP Server 实例
 server = Server("neuro-memory")
@@ -44,11 +45,12 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="process_memory",
-            description="""处理用户输入，检索相关记忆并异步存储。
+            description="""处理用户输入，检索相关记忆并异步存储（v3.0）。
             
 返回结构化 JSON，包含：
-- vector_chunks: 语义相关的记忆片段
-- graph_relations: 知识图谱中的关系
+- resolved_query: 指代消解后的查询
+- memories: 语义相关的记忆片段
+- relations: 知识图谱中的关系
 - metadata: 检索耗时、是否有记忆等信息
 
 适用于：将记忆上下文注入到 LLM prompt 中""",
@@ -111,6 +113,40 @@ async def list_tools() -> list[Tool]:
                 "required": ["user_id"],
             },
         ),
+        Tool(
+            name="end_session",
+            description="""显式结束用户的当前会话。
+            
+后台触发长期记忆整合流程，将短期记忆整合为长期记忆。
+
+注意：接口立即返回，整合过程在后台异步执行。""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {
+                        "type": "string",
+                        "description": "用户标识",
+                    },
+                },
+                "required": ["user_id"],
+            },
+        ),
+        Tool(
+            name="get_session_status",
+            description="""获取用户当前会话状态（调试用）。
+            
+返回 Session 的事件数、创建时间、最后活跃时间等信息。""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {
+                        "type": "string",
+                        "description": "用户标识",
+                    },
+                },
+                "required": ["user_id"],
+            },
+        ),
     ]
 
 
@@ -126,7 +162,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             input_text = arguments.get("input", "")
             user_id = arguments.get("user_id", "default_user")
             
-            result = brain.process(input_text, user_id)
+            result = await brain.process_async(input_text, user_id)
             return [TextContent(
                 type="text",
                 text=json.dumps(result, ensure_ascii=False, indent=2),
@@ -146,6 +182,40 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             user_id = arguments.get("user_id", "default_user")
             
             result = brain.get_user_graph(user_id)
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, ensure_ascii=False, indent=2),
+            )]
+            
+        elif name == "end_session":
+            user_id = arguments.get("user_id", "default_user")
+            
+            result = await brain.end_session_async(user_id)
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, ensure_ascii=False, indent=2),
+            )]
+            
+        elif name == "get_session_status":
+            user_id = arguments.get("user_id", "default_user")
+            
+            from session_manager import get_session_manager
+            session_manager = get_session_manager()
+            status = session_manager.get_session_status(user_id)
+            
+            if status is None:
+                result = {
+                    "status": "success",
+                    "has_active_session": False,
+                    "session_info": None,
+                }
+            else:
+                result = {
+                    "status": "success",
+                    "has_active_session": True,
+                    "session_info": status,
+                }
+            
             return [TextContent(
                 type="text",
                 text=json.dumps(result, ensure_ascii=False, indent=2),
@@ -172,6 +242,7 @@ async def main():
     """启动 MCP Server（stdio 模式）"""
     logger.info("启动 NeuroMemory MCP Server (stdio 模式)")
     async with stdio_server() as (read_stream, write_stream):
+        get_session_manager().start_timeout_checker()
         await server.run(
             read_stream,
             write_stream,

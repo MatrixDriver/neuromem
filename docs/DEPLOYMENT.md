@@ -32,7 +32,7 @@
 │  │  │ memory_graph_db     │  │ memory_vector_db    │      │   │
 │  │  │ (Neo4j 5.26.0)      │  │ (Qdrant latest)     │      │   │
 │  │  │                     │  │                     │      │   │
-│  │  │ :7474 (Browser)     │  │ :6333 (API)         │      │   │
+│  │  │ :7474 (Browser)     │  │ :6400 (API)         │      │   │
 │  │  │ :17687 (Bolt)       │  │                     │      │   │
 │  │  │                     │  │                     │      │   │
 │  │  │ ./neo4j_data:/data  │  │ ./qdrant_data:      │      │   │

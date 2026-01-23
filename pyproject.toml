@@ -13,19 +13,35 @@ dependencies = [
     # HTTP Server 依赖
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
+    "typer>=0.9.0",
 ]
+
+[project.scripts]
+neuromemory = "neuromemory.cli:app"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "pytest-timeout>=2.1.0",
 ]
 
 [tool.setuptools]
-# 不自动发现包，因为这是一个脚本项目而非库
-py-modules = []
-packages = ["tests"]
+packages = ["neuromemory", "tests"]
+py-modules = [
+    "config",
+    "private_brain",
+    "session_manager",
+    "coreference",
+    "consolidator",
+    "privacy_filter",
+    "health_checks",
+]
 
 [tool.pytest.ini_options]
 # 默认显示 print 输出，便于观察测试过程
 addopts = "-v -s"
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "requires_db: marks tests that require database services (Qdrant/Neo4j)",
+]

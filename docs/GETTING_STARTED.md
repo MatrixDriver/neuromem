@@ -54,8 +54,8 @@ docker-compose ps
 | 服务 | 地址 | 凭证 |
 |------|------|------|
 | Neo4j Browser | http://localhost:7474 | neo4j / password123 |
-| Qdrant API | http://localhost:6333 | 无需认证 |
-| Qdrant Dashboard | http://localhost:6333/dashboard | 无需认证 |
+| Qdrant API | http://localhost:6400 | 无需认证 |
+| Qdrant Dashboard | http://localhost:6400/dashboard | 无需认证 |
 
 ---
 
@@ -116,11 +116,11 @@ answer = cognitive_process(brain, "张三管理什么项目？", user_id="test_u
 
 ---
 
-## 使用 SDK (开发中)
+## 使用 SDK
+
+安装：`pip install -e .` 或 `uv pip install -e .`
 
 ```python
-# [🚧 开发中] 目标使用方式
-
 from neuromemory import NeuroMemory
 
 # 初始化
@@ -133,9 +133,20 @@ memory.add("李四负责人工智能项目", user_id="test_user")
 # 检索
 results = memory.search("张三管理什么", user_id="test_user")
 
-# 问答 (完整认知流程)
+# 问答
 answer = memory.ask("张三管理什么项目？", user_id="test_user")
 print(answer)
+```
+
+## 使用 CLI
+
+```bash
+neuromemory status
+neuromemory add "张三是李四的老板" --user test_user
+neuromemory search "张三管理什么" --user test_user --limit 5
+neuromemory ask "张三管理什么项目？" --user test_user
+neuromemory graph export --user test_user
+neuromemory graph visualize --user test_user
 ```
 
 ---

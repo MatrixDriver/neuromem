@@ -12,7 +12,30 @@
 
 ---
 
-## Python SDK 接口 `[🚧 开发中]`
+## Python SDK 接口 `[✅ 已实现]`
+
+安装后使用：`uv pip install -e .` 或 `pip install -e .`
+
+```python
+from neuromemory import NeuroMemory
+
+# 初始化
+m = NeuroMemory()
+
+# 添加记忆（返回 memory_id）
+m.add("张三是李四的老板", user_id="test_user")
+
+# 检索（返回 dict: memories, relations, metadata）
+m.search("张三管理什么", user_id="test_user", limit=5)
+
+# 问答（返回 answer 字符串）
+m.ask("张三管理什么项目？", user_id="test_user")
+
+# 获取知识图谱（返回 dict: status, nodes, edges, ...）
+m.get_graph(user_id="test_user", depth=2)
+```
+
+接口定义（参考）：
 
 ```python
 # 核心接口定义
@@ -99,12 +122,14 @@ class NeuroMemory:
 
 ---
 
-## REST API 接口 `[📋 规划]`
+## REST API 接口 `[✅ 已实现]`
+
+实现路径为 `/api/v1/*`，与根路径 `/process`、`/graph`、`/health` 等并存。详见 [REST API 文档](REST_API.md)。
 
 ```yaml
 # OpenAPI 3.0 风格定义
 
-POST /api/v1/memory
+POST /api/v1/memory  # 已实现
   description: 添加记忆
   request:
     body:
@@ -114,7 +139,7 @@ POST /api/v1/memory
   response:
     memory_id: string
 
-GET /api/v1/memory/search
+GET /api/v1/memory/search  # 已实现
   description: 混合检索
   parameters:
     query: string (required)
@@ -123,7 +148,7 @@ GET /api/v1/memory/search
   response:
     results: array[MemoryResult]
 
-POST /api/v1/ask
+POST /api/v1/ask  # 已实现
   description: 基于记忆回答问题
   request:
     body:
@@ -133,7 +158,7 @@ POST /api/v1/ask
     answer: string
     sources: array[MemoryResult]
 
-GET /api/v1/graph
+GET /api/v1/graph  # 已实现
   description: 获取知识图谱
   parameters:
     user_id: string
@@ -142,7 +167,7 @@ GET /api/v1/graph
     nodes: array[Node]
     edges: array[Edge]
 
-GET /api/v1/health
+GET /api/v1/health  # 已实现
   description: 健康检查
   response:
     status: "healthy" | "unhealthy"
@@ -154,17 +179,20 @@ GET /api/v1/health
 
 ---
 
-## CLI 接口 `[📋 规划]`
+## CLI 接口 `[✅ 已实现]`
+
+`uv pip install -e .` 或 `pip install -e .` 后使用 `neuromemory` 命令。
 
 ```bash
-# 命令行工具设计
+# 命令行示例
 
+neuromemory status                                    # 检查 Neo4j、Qdrant、LLM 状态
 neuromemory add "DeepMind 是 Google 的子公司" --user user_001
 neuromemory search "Google 有哪些子公司" --user user_001 --limit 5
 neuromemory ask "Demis 和 Gemini 有什么关系" --user user_001
-neuromemory graph export --user user_001 --format json
+neuromemory graph export --user user_001               # JSON 到 stdout
+neuromemory graph export --user user_001 -o out.json  # 输出到文件
 neuromemory graph visualize --user user_001 --open-browser
-neuromemory status  # 检查服务状态
 ```
 
 ---

@@ -293,37 +293,21 @@ def cognitive_process(brain, user_input, user_id):
 
 ---
 
-## Python SDK (NeuroMemory 类) `[🚧 开发中]`
+## Python SDK (NeuroMemory 类) `[✅ 已实现]`
 
-**目标**: 封装底层函数，提供简洁易用的 API
+**目标**: 封装底层函数，提供简洁易用的 API。底层委托 `PrivateBrain`（`get_brain()`）。
 
 ```python
-# [🚧 开发中] 目标接口设计
+from neuromemory import NeuroMemory
 
-class NeuroMemory:
-    """神经符号混合记忆系统主接口"""
-
-    def __init__(self, config: dict = None):
-        """初始化记忆系统"""
-        self._brain = Memory.from_config(config or MEM0_CONFIG)
-        self._llm = create_chat_llm()
-
-    def add(self, content: str, user_id: str = "default", metadata: dict = None) -> str:
-        """添加记忆，返回 memory_id"""
-        pass
-
-    def search(self, query: str, user_id: str = "default", limit: int = 10) -> list:
-        """混合检索记忆"""
-        pass
-
-    def ask(self, question: str, user_id: str = "default") -> str:
-        """基于记忆回答问题 (完整认知流程)"""
-        pass
-
-    def get_graph(self, user_id: str = "default", depth: int = 2) -> dict:
-        """获取用户的知识图谱"""
-        pass
+m = NeuroMemory()
+m.add("张三是李四的老板", user_id="test_user")   # 返回 memory_id
+m.search("张三管理什么", user_id="test_user", limit=5)  # 返回 dict: memories, relations, metadata
+m.ask("张三管理什么项目？", user_id="test_user")  # 返回 answer 字符串
+m.get_graph(user_id="test_user", depth=2)        # 返回 dict: status, nodes, edges, ...
 ```
+
+配套 **CLI**：`neuromemory status`、`add`、`search`、`ask`、`graph export`、`graph visualize`。安装：`uv pip install -e .` 或 `pip install -e .`。详见 [API.md](API.md)、[GETTING_STARTED.md](GETTING_STARTED.md)。
 
 ---
 
@@ -348,7 +332,7 @@ MEM0_CONFIG = {
         "provider": "qdrant",
         "config": {
             "host": "localhost",
-            "port": 6333,
+            "port": 6400,  # 使用 6400 避免 Windows 保留端口冲突（6333 在保留范围 6296-6395 内）
             "collection_name": "neuro_memory_openai_1024",  # 自动生成
             "embedding_model_dims": 1024,  # 明确指定向量维度
         }

@@ -14,8 +14,9 @@ NeuroMemory HTTP Server
 """
 import logging
 import sys
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -28,7 +29,22 @@ logging.basicConfig(
 logger = logging.getLogger("neuro_memory.http")
 
 from config import HTTP_SERVER_CONFIG
+from health_checks import check_llm_config, check_neo4j, check_qdrant
 from private_brain import get_brain
+from session_manager import get_session_manager
+
+# =============================================================================
+# Lifespan：启动时启动 Session 超时检查
+# =============================================================================
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """启动时启动 Session 超时检查任务（需在已有 event loop 中）"""
+    get_session_manager().start_timeout_checker()
+    yield
+    # shutdown：可选清理
+
 
 # =============================================================================
 # FastAPI 应用初始化
@@ -37,9 +53,10 @@ from private_brain import get_brain
 app = FastAPI(
     title="NeuroMemory API",
     description="私有化外挂大脑服务 - Memory-as-a-Service",
-    version="2.0.0",
+    version="3.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # 配置 CORS（支持 DIFY 等跨域调用）
@@ -84,6 +101,50 @@ class HealthResponse(BaseModel):
     service: str
 
 
+class EndSessionRequest(BaseModel):
+    """结束会话请求"""
+    user_id: str
+
+
+class EndSessionResponse(BaseModel):
+    """结束会话响应"""
+    status: str
+    message: str
+    session_info: dict | None = None
+
+
+# ---------- /api/v1 请求/响应模型 ----------
+class AddMemoryRequest(BaseModel):
+    """添加记忆请求"""
+    content: str
+    user_id: str = "default"
+    metadata: dict | None = None
+
+
+class AddMemoryResponse(BaseModel):
+    """添加记忆响应"""
+    memory_id: str
+
+
+class AskRequest(BaseModel):
+    """基于记忆问答请求"""
+    question: str
+    user_id: str = "default"
+
+
+class AskResponse(BaseModel):
+    """基于记忆问答响应"""
+    answer: str
+    sources: list
+
+
+class HealthV1Response(BaseModel):
+    """健康检查 v1 响应（含 components）"""
+    status: str
+    service: str = "neuro-memory"
+    components: dict  # {"neo4j": bool, "qdrant": bool, "llm": bool}
+
+
 # =============================================================================
 # API 端点
 # =============================================================================
@@ -91,11 +152,12 @@ class HealthResponse(BaseModel):
 @app.post("/process", summary="处理记忆（生产模式）")
 async def process_memory(request: ProcessRequest) -> dict:
     """
-    处理用户输入，检索相关记忆并异步存储。
+    处理用户输入，检索相关记忆并异步存储（v3.0 Session 管理）。
     
-    返回结构化 JSON，包含：
-    - vector_chunks: 语义相关的记忆片段
-    - graph_relations: 知识图谱中的关系
+    返回结构化 JSON（v3 格式），包含：
+    - resolved_query: 指代消解后的查询
+    - memories: 语义相关的记忆片段
+    - relations: 知识图谱中的关系
     - metadata: 检索耗时、是否有记忆等信息
     
     适用于：将记忆上下文注入到 LLM prompt 中
@@ -104,15 +166,16 @@ async def process_memory(request: ProcessRequest) -> dict:
     
     try:
         brain = get_brain()
-        result = brain.process(request.input, request.user_id)
+        result = await brain.process_async(request.input, request.user_id)
         return result
     except Exception as e:
         logger.error(f"[/process] 处理失败: {e}")
-        # 静默降级：返回空结果而非抛出异常
+        # 静默降级：返回 v3 格式的空结果
         return {
             "status": "error",
-            "vector_chunks": [],
-            "graph_relations": [],
+            "resolved_query": request.input,
+            "memories": [],
+            "relations": [],
             "metadata": {
                 "retrieval_time_ms": 0,
                 "has_memory": False,
@@ -124,15 +187,12 @@ async def process_memory(request: ProcessRequest) -> dict:
 @app.post("/debug", summary="处理记忆（调试模式）")
 async def debug_process_memory(request: ProcessRequest) -> DebugResponse:
     """
-    调试模式：处理用户输入并返回详细的处理过程。
+    调试模式：处理用户输入并返回详细的处理过程（旧版流程）。
     
-    返回自然语言格式的报告，包含：
-    - 检索过程（向量匹配结果、图谱关系）
-    - 存储决策（隐私分类结果、是否存储）
-    - 性能统计（各阶段耗时）
-    - 原始数据
+    不写 Session、不做指代消解，仅演示检索 + 隐私分类 + 存储决策；适用于观察
+    分类与存储行为。生产级流程（Session、指代消解、v3 格式）请使用 POST /process。
     
-    适用于：开发调试、验证系统行为
+    报告包含：检索过程、存储决策、性能统计、原始数据。
     """
     logger.info(f"[/debug] user_id={request.user_id}, input={request.input[:50]}...")
     
@@ -169,6 +229,67 @@ async def get_user_graph(user_id: str) -> dict:
         }
 
 
+@app.post("/end-session", summary="结束会话")
+async def end_session(request: EndSessionRequest) -> EndSessionResponse:
+    """
+    显式结束用户的当前会话。
+    
+    后台触发长期记忆整合流程：
+    1. 对 Session 事件执行隐私过滤
+    2. 存储私有数据到长期记忆
+    3. 清理短期存储
+    
+    注意：接口立即返回，整合过程在后台异步执行。
+    """
+    logger.info(f"[/end-session] user_id={request.user_id}")
+    
+    try:
+        brain = get_brain()
+        result = await brain.end_session_async(request.user_id)
+        return EndSessionResponse(**result)
+    except Exception as e:
+        logger.error(f"[/end-session] 处理失败: {e}")
+        return EndSessionResponse(
+            status="error",
+            message=f"处理失败: {str(e)}",
+            session_info=None,
+        )
+
+
+@app.get("/session-status/{user_id}", summary="获取会话状态")
+async def get_session_status(user_id: str) -> dict:
+    """
+    获取用户当前会话状态（调试用）。
+    
+    返回 Session 的事件数、创建时间、最后活跃时间等信息。
+    """
+    logger.info(f"[/session-status] user_id={user_id}")
+    
+    try:
+        from session_manager import get_session_manager
+        session_manager = get_session_manager()
+        status = session_manager.get_session_status(user_id)
+        
+        if status is None:
+            return {
+                "status": "success",
+                "has_active_session": False,
+                "session_info": None,
+            }
+        
+        return {
+            "status": "success",
+            "has_active_session": True,
+            "session_info": status,
+        }
+    except Exception as e:
+        logger.error(f"[/session-status] 获取失败: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+        }
+
+
 @app.get("/health", summary="健康检查")
 async def health_check() -> HealthResponse:
     """
@@ -177,6 +298,75 @@ async def health_check() -> HealthResponse:
     用于负载均衡器、容器编排等场景的健康探测。
     """
     return HealthResponse(status="healthy", service="neuro-memory")
+
+
+# =============================================================================
+# /api/v1 路由（与根路径并存）
+# =============================================================================
+
+router = APIRouter(prefix="/api/v1", tags=["v1"])
+
+
+@router.post("/memory", summary="添加记忆")
+async def api_v1_add_memory(request: AddMemoryRequest) -> AddMemoryResponse:
+    """添加记忆（跳过隐私过滤），返回 memory_id。"""
+    logger.info(f"[/api/v1/memory] user_id={request.user_id}, content_len={len(request.content)}")
+    brain = get_brain()
+    result = brain.add(request.content, request.user_id)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("error", "添加失败"))
+    return AddMemoryResponse(memory_id=result["memory_id"])
+
+
+@router.get("/memory/search", summary="混合检索")
+async def api_v1_memory_search(
+    query: str = Query(..., description="查询文本"),
+    user_id: str = Query("default", description="用户标识"),
+    limit: int = Query(10, description="返回数量上限"),
+) -> dict:
+    """混合检索，返回 memories、relations、metadata。"""
+    logger.info(f"[/api/v1/memory/search] user_id={user_id}, query_len={len(query)}, limit={limit}")
+    brain = get_brain()
+    return brain.search(query, user_id=user_id, limit=limit)
+
+
+@router.post("/ask", summary="基于记忆回答问题")
+async def api_v1_ask(request: AskRequest) -> AskResponse:
+    """基于记忆检索 + LLM 生成回答，返回 answer、sources。"""
+    logger.info(f"[/api/v1/ask] user_id={request.user_id}, question_len={len(request.question)}")
+    brain = get_brain()
+    result = brain.ask(request.question, request.user_id)
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result.get("error", "问答失败"))
+    return AskResponse(answer=result["answer"], sources=result["sources"])
+
+
+@router.get("/graph", summary="获取知识图谱")
+async def api_v1_graph(
+    user_id: str = Query("default", description="用户标识"),
+    depth: int = Query(2, description="预留遍历深度"),
+) -> dict:
+    """获取用户知识图谱，含 nodes、edges、memories、graph_relations。"""
+    logger.info(f"[/api/v1/graph] user_id={user_id}, depth={depth}")
+    brain = get_brain()
+    return brain.get_user_graph(user_id, depth=depth)
+
+
+@router.get("/health", summary="健康检查（含 components）")
+async def api_v1_health() -> HealthV1Response:
+    """健康检查，返回 status 及 components: {neo4j, qdrant, llm}。"""
+    neo4j_ok = check_neo4j()
+    qdrant_ok = check_qdrant()
+    llm_ok = check_llm_config()
+    status = "healthy" if (neo4j_ok and qdrant_ok) else "unhealthy"
+    return HealthV1Response(
+        status=status,
+        service="neuro-memory",
+        components={"neo4j": neo4j_ok, "qdrant": qdrant_ok, "llm": llm_ok},
+    )
+
+
+app.include_router(router)
 
 
 # =============================================================================

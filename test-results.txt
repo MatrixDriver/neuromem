@@ -1,0 +1,288 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.13.11, pytest-9.0.2, pluggy-1.6.0 -- D:\CODE\NeuroMemory\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\CODE\NeuroMemory
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.12.1, langsmith-0.6.4, timeout-2.4.0
+collecting ... collected 40 items
+
+tests/test_cognitive.py::TestIdentityExtraction::test_extract_name_pattern_1 [身份提取] 识别到用户名: 小朱
+PASSED
+tests/test_cognitive.py::TestIdentityExtraction::test_extract_name_pattern_2 [身份提取] 识别到用户名: 张三
+PASSED
+tests/test_cognitive.py::TestIdentityExtraction::test_extract_name_pattern_3 [身份提取] 识别到用户名: 李四
+PASSED
+tests/test_cognitive.py::TestIdentityExtraction::test_no_identity_in_input PASSED
+tests/test_cognitive.py::TestPronounResolution::test_resolve_my PASSED
+tests/test_cognitive.py::TestPronounResolution::test_resolve_me PASSED
+tests/test_cognitive.py::TestPronounResolution::test_skip_identity_statement PASSED
+tests/test_cognitive.py::TestPronounResolution::test_no_identity_no_resolution PASSED
+tests/test_cognitive.py::TestPrivacyFilter::test_private_personal_info 
+--- 测试个人信息分类 ---
+类型: PRIVATE
+理由: 陈述性个人信息，包含'我'且涉及个人身份
+PASSED
+tests/test_cognitive.py::TestPrivacyFilter::test_private_personal_relationship 
+--- 测试个人关系分类 ---
+类型: PRIVATE
+理由: 陈述了私有实体关系（灿灿是小朱的女儿），属于特定个人的家庭信息
+PASSED
+tests/test_cognitive.py::TestPrivacyFilter::test_private_personal_preference 
+--- 测试个人偏好分类 ---
+类型: PRIVATE
+理由: 陈述个人偏好，包含'我'指向用户
+PASSED
+tests/test_cognitive.py::TestPrivacyFilter::test_public_factual_knowledge 
+--- 测试公共事实分类 ---
+类型: PUBLIC
+理由: 陈述的是百科事实，不包含个人信息
+PASSED
+tests/test_cognitive.py::TestPrivacyFilter::test_public_query 
+--- 测试查询问句分类 ---
+类型: PUBLIC
+理由: 这是一个查询他人信息的问句，属于公共查询，不涉及用户自身私有信息
+PASSED
+tests/test_cognitive.py::TestPrivateBrain::test_process_returns_json_format 
+============================================================
+初始化 PrivateBrain (v2 架构)...
+当前配置: LLM=deepseek, Embedding=siliconflow
+============================================================
+执行预热调用...
+预热完成
+============================================================
+
+--- 测试 JSON 返回格式 ---
+FAILED
+tests/test_cognitive.py::TestPrivateBrain::test_process_debug_returns_natural_language 
+--- 测试调试模式输出 ---
+=== 检索过程 ===
+[向量检索] 查询: "测试查询"
+  - 无匹配结果
+
+[图谱检索]
+  - 无关联关系
+
+=== 存储决策 ===
+[LLM 分类] 类型: PUBLIC
+[分类理由] 用户输入为通用查询语句，不包含任何个人信息
+[决策] 不存储
+
+=== 性能统计 ===
+- 检索耗时: 3743ms
+- 隐私分类耗时: 2183ms
+- 总耗时: 5927ms
+
+=== 原始数据 ===
+向量结果数量: 0
+图谱关系数量: 0
+PASSED
+tests/test_cognitive.py::TestPrivateBrain::test_add_and_search 
+--- 测试添加和搜索 ---
+添加结果: {'status': 'success', 'stored': True}
+搜索结果: {'status': 'success', 'resolved_query': '小明的爱好是什么', 'memories': [{'content': '小明喜欢打篮球', 'score': 0.8445996}], 'relations': [], 'metadata': {'retrieval_time_ms': 4387, 'has_memory': True}}
+PASSED
+tests/test_cognitive.py::TestPrivateBrain::test_get_user_graph 
+--- 测试获取用户图谱 ---
+图谱结果: {'status': 'success', 'user_id': 'test_user_1769155378465', 'memories': [{'id': '41b9e6da-92f8-4de7-b303-83fc2a062681', 'memory': '小红是小明的妹妹'}], 'graph_relations': [{'source': '小红', 'relationship': 'younger_sister', 'target': '小明'}], 'metadata': {'memory_count': 1, 'relation_count': 1}}
+PASSED
+tests/test_cognitive.py::TestYSplitFlow::test_private_data_stored 
+============================================================
+测试：私有数据应被存储
+============================================================
+
+>>> 输入私有数据: 我叫测试用户_397200
+=== 检索过程 ===
+[向量检索] 查询: "我叫测试用户_397200"
+  - 无匹配结果
+
+[图谱检索]
+  - 无关联关系
+
+=== 存储决策 ===
+[LLM 分类] 类型: PRIVATE
+[分类理由] 用户陈述了个人身份信息（姓名），属于私有数据
+[决策] 存储
+
+=== 性能统计 ===
+- 检索耗时: 4064ms
+- 隐私分类耗时: 2090ms
+- 总耗时: 6156ms
+
+=== 原始数据 ===
+向量结果数量: 0
+图谱关系数量: 0
+
+>>> 搜索查询: 测试用户_397200
+>>> 搜索结果: {'status': 'success', 'resolved_query': '测试用户_397200', 'memories': [{'content': 'Name is 测试用户_397200', 'score': 0.90982383}], 'relations': [], 'metadata': {'retrieval_time_ms': 3259, 'has_memory': True}}
+FAILED
+tests/test_cognitive.py::TestYSplitFlow::test_public_data_discarded 
+============================================================
+测试：公共知识应被丢弃
+============================================================
+
+>>> 输入公共知识: 太阳从东方升起
+=== 检索过程 ===
+[向量检索] 查询: "太阳从东方升起"
+  - 无匹配结果
+
+[图谱检索]
+  - 无关联关系
+
+=== 存储决策 ===
+[LLM 分类] 类型: PUBLIC
+[分类理由] 陈述的是普遍的自然现象，属于通用知识
+[决策] 不存储
+
+=== 性能统计 ===
+- 检索耗时: 5219ms
+- 隐私分类耗时: 2015ms
+- 总耗时: 7235ms
+
+=== 原始数据 ===
+向量结果数量: 0
+图谱关系数量: 0
+PASSED
+tests/test_cognitive.py::TestYSplitFlow::test_query_only_retrieves 
+============================================================
+测试：查询只检索不存储
+============================================================
+
+>>> 查询: 小李的猫叫什么名字？
+=== 检索过程 ===
+[向量检索] 查询: "小李的猫叫什么名字？"
+  - 匹配: "小李有一只猫叫咪咪" (score: 0.82029784)
+
+[图谱检索]
+  - 小李 --[has_pet]--> ?
+
+=== 存储决策 ===
+[LLM 分类] 类型: PUBLIC
+[分类理由] 这是一个查询他人宠物名字的问句，属于查询类，不涉及用户自身个人信息
+[决策] 不存储
+
+=== 性能统计 ===
+- 检索耗时: 5126ms
+- 隐私分类耗时: 2835ms
+- 总耗时: 7962ms
+
+=== 原始数据 ===
+向量结果数量: 1
+图谱关系数量: 1
+PASSED
+tests/test_cognitive.py::TestMultiHopRetrieval::test_family_relationship_retrieval 
+============================================================
+测试：家庭关系检索
+============================================================
+
+--- 阶段 1: 构建记忆 ---
+>>> 存储: 小朱有两个孩子
+>>> 存储: 灿灿是小朱的女儿
+>>> 存储: 灿灿还有一个弟弟叫帅帅
+
+[等待索引更新...]
+
+--- 阶段 2: 测试检索 ---
+>>> 查询: 小朱的儿子叫什么名字
+
+检索结果:
+FAILED
+tests/test_cognitive.py::TestPerformance::test_retrieval_response_time 
+--- 测试检索响应时间 ---
+检索耗时: 6.46s
+返回的检索时间: 6457ms
+FAILED
+tests/test_cognitive.py::TestPerformance::test_process_response_time 
+--- 测试完整处理响应时间 ---
+处理耗时: 3.55s
+PASSED
+tests/test_session.py::TestSessionManager::test_create_session PASSED
+tests/test_session.py::TestSessionManager::test_get_existing_session PASSED
+tests/test_session.py::TestSessionManager::test_add_event PASSED
+tests/test_session.py::TestSessionManager::test_get_session_events_limit PASSED
+tests/test_session.py::TestSessionManager::test_end_session PASSED
+tests/test_session.py::TestSessionManager::test_get_session_status PASSED
+tests/test_session.py::TestCoreferenceResolver::test_resolve_query_no_context PASSED
+tests/test_session.py::TestCoreferenceResolver::test_resolve_query_this PASSED
+tests/test_session.py::TestCoreferenceResolver::test_resolve_query_she PASSED
+tests/test_session.py::TestCoreferenceResolver::test_resolve_events_llm 
+--- 测试 LLM 消解 ---
+输入事件数: 3
+输出记忆数: 1
+  记忆 1: 用户有一个女儿叫灿灿，灿灿今年5岁，灿灿喜欢画画
+PASSED
+tests/test_session.py::TestSessionConsolidator::test_consolidate_empty_session PASSED
+tests/test_session.py::TestSessionConsolidator::test_consolidate_with_events 
+--- 测试 Session 整合 ---
+整合结果: {'stored_count': 1, 'total_events': 2, 'skipped': False, 'reason': ''}
+PASSED
+tests/test_session.py::TestSessionIntegration::test_multi_turn_conversation 
+============================================================
+初始化 PrivateBrain (v3.0 Session 管理)...
+当前配置: LLM=deepseek, Embedding=siliconflow
+============================================================
+执行预热调用...
+预热完成
+============================================================
+
+============================================================
+测试：多轮对话指代消解
+============================================================
+
+>>> 输入: 我叫小朱
+>>> 返回: 我叫小朱
+
+>>> 输入: 我女儿叫灿灿
+>>> 返回: 我女儿叫灿灿
+
+>>> 输入: 她今年几岁了？
+>>> 返回 resolved_query: 灿灿今年几岁了？
+>>> 返回 memories: 0 条
+PASSED
+tests/test_session.py::TestSessionIntegration::test_end_session_consolidation 
+============================================================
+测试：显式结束 Session
+============================================================
+
+>>> 结束 Session 结果: {'status': 'success', 'message': 'Session ending, consolidation started', 'session_info': {'session_id': 'sess_8b56210ed18d', 'event_count': 2, 'duration_seconds': 12, 'created_at': '2026-01-23T16:06:08.201264', 'ended_at': '2026-01-23T16:06:20.604164'}}
+
+>>> 搜索 '小朱的女儿': {'status': 'success', 'resolved_query': '小朱的女儿', 'memories': [], 'relations': [], 'metadata': {'retrieval_time_ms': 7906, 'has_memory': False}}
+PASSED
+tests/test_session.py::TestSessionIntegration::test_cross_session_query 
+============================================================
+测试：跨 Session 查询
+============================================================
+
+>>> 查询: 小朱的女儿叫什么？
+>>> 返回: {'status': 'success', 'resolved_query': '小朱的女儿叫什么？', 'memories': [], 'relations': [], 'metadata': {'retrieval_time_ms': 4074, 'has_memory': False}}
+PASSED
+tests/test_session.py::TestEdgeCases::test_empty_session_timeout PASSED
+tests/test_session.py::TestEdgeCases::test_max_events_limit PASSED
+
+================================== FAILURES ===================================
+______________ TestPrivateBrain.test_process_returns_json_format ______________
+tests\test_cognitive.py:239: in test_process_returns_json_format
+    assert "vector_chunks" in result
+E   AssertionError: assert 'vector_chunks' in {'status': 'success', 'resolved_query': '\u6d4b\u8bd5\u67e5\u8be2', 'memories': [], 'relations': [], 'metadata': {'retrieval_time_ms': 3567, 'has_memory': False}}
+___________________ TestYSplitFlow.test_private_data_stored ___________________
+tests\test_cognitive.py:345: in test_private_data_stored
+    has_chunks = len(search_result["vector_chunks"]) > 0
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'vector_chunks'
+__________ TestMultiHopRetrieval.test_family_relationship_retrieval ___________
+tests\test_cognitive.py:453: in test_family_relationship_retrieval
+    print(f"  - 向量记忆数: {len(result['vector_chunks'])}")
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'vector_chunks'
+________________ TestPerformance.test_retrieval_response_time _________________
+tests\test_cognitive.py:509: in test_retrieval_response_time
+    assert elapsed < 5, f"检索时间过长: {elapsed:.2f}s"
+E   AssertionError: 检索时间过长: 6.46s
+E   assert 6.457718200021191 < 5
+=========================== short test summary info ===========================
+FAILED tests/test_cognitive.py::TestPrivateBrain::test_process_returns_json_format - AssertionError: assert 'vector_chunks' in {'status': 'success', 'resolved_query': '\u6d4b\u8bd5\u67e5\u8be2', 'memories': [], 'relations': [], 'metadata': {'retrieval_time_ms': 3567, 'has_memory': False}}
+FAILED tests/test_cognitive.py::TestYSplitFlow::test_private_data_stored - KeyError: 'vector_chunks'
+FAILED tests/test_cognitive.py::TestMultiHopRetrieval::test_family_relationship_retrieval - KeyError: 'vector_chunks'
+FAILED tests/test_cognitive.py::TestPerformance::test_retrieval_response_time - AssertionError: 检索时间过长: 6.46s
+assert 6.457718200021191 < 5
+================== 4 failed, 36 passed in 283.45s (0:04:43) ===================

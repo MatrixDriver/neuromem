@@ -4,18 +4,27 @@ PrivateBrain - 私有化外挂大脑核心模块
 实现 Y 型分流架构：
 - 同步路径：检索相关记忆，立即返回结构化上下文
 - 异步路径：隐私分类 + 记忆写入（Fire-and-forget）
+
+v3.0 新增：
+- Session 管理：内部自动管理短期记忆
+- 指代消解：检索时规则匹配，整合时 LLM 消解
 """
 import time
 import logging
 import asyncio
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
+from datetime import datetime
 
 from mem0 import Memory
 
-from config import MEM0_CONFIG
+from config import MEM0_CONFIG, create_chat_llm
 from privacy_filter import classify_privacy, PrivacyType
+from session_manager import get_session_manager, Event
+from coreference import get_coreference_resolver
+# 延迟导入 consolidator，避免循环导入
 
 # 配置日志
 logger = logging.getLogger("neuro_memory.brain")
@@ -40,21 +49,23 @@ GRAPH_MAX_DEPTH = 2
 
 @dataclass
 class RetrievalResult:
-    """检索结果"""
-    vector_chunks: list[dict] = field(default_factory=list)
-    graph_relations: list[dict] = field(default_factory=list)
+    """检索结果（v3 格式）"""
+    memories: list[dict] = field(default_factory=list)  # v3: 语义化命名
+    relations: list[dict] = field(default_factory=list)  # v3: 简化命名
+    resolved_query: str = ""  # v3: 消解后的查询
     retrieval_time_ms: int = 0
     
     @property
     def has_memory(self) -> bool:
-        return len(self.vector_chunks) > 0 or len(self.graph_relations) > 0
+        return len(self.memories) > 0 or len(self.relations) > 0
     
     def to_dict(self) -> dict:
-        """转换为 JSON 可序列化的字典"""
+        """转换为 JSON 可序列化的字典（v3 格式）"""
         return {
             "status": "success",
-            "vector_chunks": self.vector_chunks,
-            "graph_relations": self.graph_relations,
+            "resolved_query": self.resolved_query,
+            "memories": self.memories,
+            "relations": self.relations,
             "metadata": {
                 "retrieval_time_ms": self.retrieval_time_ms,
                 "has_memory": self.has_memory,
@@ -212,38 +223,86 @@ class PrivateBrain:
             max_workers=2,
             thread_name_prefix="brain_consolidate"
         )
-        logger.info("PrivateBrain 初始化完成")
+        
+        # v3.0: Session 管理和指代消解
+        self.session_manager = get_session_manager()
+        self.coreference_resolver = get_coreference_resolver()
+        # 延迟导入 consolidator，避免循环导入
+        self._consolidator = None
+        
+        # 设置整合回调
+        self.session_manager.set_consolidate_callback(self._consolidate_session_sync)
+        logger.info("PrivateBrain 初始化完成（v3.0 Session 管理）")
     
-    def process(self, input_text: str, user_id: str) -> dict:
+    def _get_consolidator(self):
+        """延迟获取 consolidator 实例，避免循环导入"""
+        if self._consolidator is None:
+            from consolidator import get_consolidator
+            self._consolidator = get_consolidator()
+        return self._consolidator
+    
+    async def _process_async(self, input_text: str, user_id: str) -> dict:
         """
-        处理用户输入（生产模式）
-        
-        同步返回检索结果，异步执行存储。
-        
-        Args:
-            input_text: 用户输入
-            user_id: 用户标识
-            
-        Returns:
-            结构化 JSON 格式的检索结果
+        处理用户输入的异步实现（v3.0 流程）。
+        供 process_async 与 process（仅同步/无 loop 时）使用。
         """
-        # 同步检索
-        result = self._retrieve(input_text, user_id)
+        # 1. 获取或创建 Session
+        await self.session_manager.get_or_create_session(user_id)
         
-        # 异步存储（Fire-and-forget）
-        self._executor.submit(
-            self._background_consolidate,
-            input_text,
-            user_id
+        # 2. 获取最近事件进行指代消解
+        context_events = await self.session_manager.get_session_events(user_id, limit=5)
+        
+        # 3. 消解查询（同步）
+        resolved_query = self.coreference_resolver.resolve_query(input_text, context_events)
+        
+        # 4. 使用消解后的查询检索长期记忆（同步）
+        result = self._retrieve(resolved_query, user_id)
+        result.resolved_query = resolved_query
+        
+        # 5. 创建 Event 并添加到 Session
+        event = Event(
+            event_id=f"evt_{uuid.uuid4().hex[:12]}",
+            role="user",
+            content=input_text,  # 存原始输入，不存消解后的
+            timestamp=datetime.now(),
         )
+        await self.session_manager.add_event(user_id, event)
         
         return result.to_dict()
     
+    async def process_async(self, input_text: str, user_id: str) -> dict:
+        """
+        处理用户输入（生产模式，v3.0，异步入口）。
+        
+        在已有 event loop 的上下文中使用（如 FastAPI、MCP）时，应调用本方法并用
+        await；否则会因 process() 内部的 asyncio.run() 触发 RuntimeError。
+        
+        v3.0 流程同 process()；返回 v3 格式（memories/relations/resolved_query）。
+        """
+        return await self._process_async(input_text, user_id)
+    
+    def process(self, input_text: str, user_id: str) -> dict:
+        """
+        处理用户输入（生产模式，v3.0，同步入口）
+        
+        仅用于无运行中 event loop 的上下文（如 pytest、CLI、脚本）。从
+        async  handler（FastAPI、MCP）调用时请使用 process_async 并 await。
+        
+        v3.0 流程：
+        1. 获取或创建 Session
+        2. 获取最近事件进行指代消解
+        3. 使用消解后的查询检索长期记忆
+        4. 创建 Event 并添加到 Session
+        5. 返回 v3 格式（memories/relations/resolved_query）
+        """
+        return asyncio.run(self._process_async(input_text, user_id))
+    
     def process_debug(self, input_text: str, user_id: str) -> str:
         """
-        处理用户输入（调试模式）
+        处理用户输入（调试模式，旧版流程）
         
-        返回自然语言格式的完整流程说明。
+        不写 Session、不做指代消解，仅演示「检索 + 隐私分类 + 存储决策」；
+        返回自然语言格式的完整流程说明。生产级流程请使用 process / process_async。
         
         Args:
             input_text: 用户输入
@@ -290,15 +349,17 @@ class PrivateBrain:
         
         return debug_info.to_natural_language()
     
-    def get_user_graph(self, user_id: str) -> dict:
+    def get_user_graph(self, user_id: str, depth: int = 2) -> dict:
         """
-        获取用户的知识图谱
+        获取用户的知识图谱。
+        depth 预留：当前 memory.get_all 与 Neo4j 层无深度参数，后续若支持再接入。
         
         Args:
             user_id: 用户标识
+            depth: 预留的遍历深度，默认 2，当前未参与查询
             
         Returns:
-            用户的知识图谱数据
+            用户的知识图谱数据，含 memories、graph_relations、nodes、edges、metadata
         """
         try:
             # 使用空查询来获取用户的所有记忆
@@ -317,6 +378,24 @@ class PrivateBrain:
             # 去重和格式化关系
             formatted_relations = _dedupe_relations(relations) if relations else []
             
+            # 从关系中推导 nodes；edges 与 graph_relations 同构
+            unique = set()
+            for r in formatted_relations:
+                s, t = r.get("source", ""), r.get("target", "")
+                if s:
+                    unique.add(s)
+                if t:
+                    unique.add(t)
+            nodes = [{"id": n, "name": n} for n in sorted(unique)]
+            edges = [
+                {
+                    "source": r.get("source", ""),
+                    "relationship": r.get("relationship", r.get("relation", "")),
+                    "target": r.get("target", ""),
+                }
+                for r in formatted_relations
+            ]
+            
             return {
                 "status": "success",
                 "user_id": user_id,
@@ -325,10 +404,12 @@ class PrivateBrain:
                     for m in memories
                 ],
                 "graph_relations": formatted_relations,
+                "nodes": nodes,
+                "edges": edges,
                 "metadata": {
                     "memory_count": len(memories),
                     "relation_count": len(formatted_relations),
-                }
+                },
             }
         except Exception as e:
             logger.error(f"获取用户图谱失败: {e}")
@@ -338,59 +419,117 @@ class PrivateBrain:
                 "error": str(e),
             }
     
-    def search(self, query: str, user_id: str) -> dict:
+    def search(self, query: str, user_id: str, limit: int = 10) -> dict:
         """
         仅检索，不存储
         
         Args:
             query: 查询文本
             user_id: 用户标识
+            limit: 返回的记忆与关系数量上限，默认 10
             
         Returns:
-            检索结果
+            检索结果（v3 格式：memories, relations, metadata）
         """
-        return self._retrieve(query, user_id).to_dict()
+        return self._retrieve(query, user_id, limit=limit).to_dict()
+    
+    def ask(self, question: str, user_id: str = "default") -> dict:
+        """
+        基于记忆回答问题：检索 + LLM 生成回答。不写 Session。
+        
+        Args:
+            question: 用户问题
+            user_id: 用户标识
+            
+        Returns:
+            {"answer": str, "sources": list}；异常时含 "error" 键
+        """
+        try:
+            r = self._retrieve(question, user_id)
+            parts = []
+            if r.memories:
+                parts.append("记忆：\n" + "\n".join(m.get("content", "") for m in r.memories))
+            if r.relations:
+                parts.append(
+                    "关系：\n"
+                    + "\n".join(
+                        f"{x.get('source','')} -{x.get('relation','')}- {x.get('target','')}"
+                        for x in r.relations
+                    )
+                )
+            context = "\n\n".join(parts) if parts else "（无相关记忆与关系）"
+            system = "你是一个基于用户记忆回答问题的助手。请仅根据下述记忆与关系回答，不知道则明确说明。"
+            prompt = f"{system}\n\n{context}\n\n问题：{question}"
+            llm = create_chat_llm()
+            ans = llm.invoke(prompt)
+            content = ans.content if hasattr(ans, "content") else str(ans)
+            sources = [
+                {"type": "memory", "content": m.get("content", ""), "score": m.get("score")}
+                for m in r.memories
+            ] + [
+                {
+                    "type": "relation",
+                    "source": x.get("source", ""),
+                    "relation": x.get("relation", ""),
+                    "target": x.get("target", ""),
+                }
+                for x in r.relations
+            ]
+            return {"answer": content, "sources": sources}
+        except Exception as e:
+            logger.error(f"ask 失败: {e}")
+            return {"answer": "", "sources": [], "error": str(e)}
     
     def add(self, text: str, user_id: str) -> dict:
         """
-        直接添加记忆（跳过隐私过滤）
+        直接添加记忆（跳过隐私过滤）。
+
+        返回 memory_id：若 mem0.add 返回 list 且首项含 id 则使用，否则生成 mem_<uuid12>。
         
         Args:
             text: 要存储的文本
             user_id: 用户标识
             
         Returns:
-            存储结果
+            {"status":"success","memory_id": str} 或 {"status":"error","error": str}
         """
         try:
-            self.memory.add(text, user_id=user_id)
-            return {"status": "success", "stored": True}
+            res = self.memory.add(text, user_id=user_id)
+            if isinstance(res, list) and len(res) > 0 and isinstance(res[0], dict) and res[0].get("id"):
+                mid = str(res[0]["id"])
+            else:
+                mid = f"mem_{uuid.uuid4().hex[:12]}"
+            return {"status": "success", "memory_id": mid}
         except Exception as e:
             logger.error(f"存储失败: {e}")
             return {"status": "error", "error": str(e)}
     
-    def _retrieve(self, query: str, user_id: str) -> RetrievalResult:
+    def _retrieve(self, query: str, user_id: str, limit: int | None = None) -> RetrievalResult:
         """
-        内部检索方法
+        内部检索方法（v3.0 格式）。
+        limit 为 None 时使用 VECTOR_TOP_K / GRAPH_MAX_RELATIONS，与 process 等原有行为一致。
         
         Args:
             query: 查询文本
             user_id: 用户标识
+            limit: 记忆与关系数量上限；None 时用模块常量
             
         Returns:
-            RetrievalResult 对象
+            RetrievalResult 对象（v3 格式）
         """
         start_time = time.perf_counter()
+        cap_vec = limit if limit is not None else VECTOR_TOP_K
+        cap_rel = limit if limit is not None else GRAPH_MAX_RELATIONS
         
         try:
             search_results = self.memory.search(query, user_id=user_id)
         except Exception as e:
             logger.error(f"检索失败: {e}")
-            return RetrievalResult()  # 静默降级：返回空结果
+            return RetrievalResult(resolved_query=query)  # 静默降级：返回空结果
         
         # 解析结果
-        vector_chunks = []
-        graph_relations = []
+        memories = []
+        relations = []
         
         if isinstance(search_results, dict):
             raw_vectors = search_results.get("results", [])
@@ -402,22 +541,29 @@ class PrivateBrain:
             raw_vectors = []
             raw_relations = []
         
-        # 处理向量结果
-        for item in raw_vectors[:VECTOR_TOP_K]:
+        # 处理向量结果（v3 格式：memories）
+        for item in raw_vectors[:cap_vec]:
             if isinstance(item, dict):
-                vector_chunks.append({
-                    "memory": item.get("memory", str(item)),
+                memories.append({
+                    "content": item.get("memory", str(item)),  # v3: content 替代 memory
                     "score": item.get("score", 0),
                 })
         
-        # 处理图谱关系
-        graph_relations = _dedupe_relations(raw_relations)[:GRAPH_MAX_RELATIONS]
+        # 处理图谱关系（v3 格式：relations，简化字段名）
+        deduped_relations = _dedupe_relations(raw_relations)[:cap_rel]
+        for rel in deduped_relations:
+            relations.append({
+                "source": rel.get("source", ""),
+                "relation": rel.get("relationship", ""),  # v3: relation 替代 relationship
+                "target": rel.get("target", ""),
+            })
         
         elapsed_ms = int((time.perf_counter() - start_time) * 1000)
         
         return RetrievalResult(
-            vector_chunks=vector_chunks,
-            graph_relations=graph_relations,
+            memories=memories,
+            relations=relations,
+            resolved_query=query,
             retrieval_time_ms=elapsed_ms,
         )
     
@@ -455,6 +601,48 @@ class PrivateBrain:
             logger.info(f"[记忆存储] 成功: {text[:50]}...")
         except Exception as e:
             logger.error(f"记忆存储失败: {e}")
+    
+    async def end_session_async(self, user_id: str) -> dict:
+        """
+        显式结束用户的当前会话（v3.0，异步入口）。
+        
+        在已有 event loop 的上下文中（如 FastAPI、MCP）应调用本方法并 await；
+        否则 end_session() 内部的 asyncio.run() 会触发 RuntimeError。
+        """
+        summary = await self.session_manager.end_session(user_id)
+        if summary is None:
+            return {
+                "status": "success",
+                "message": "No active session",
+                "session_info": None,
+            }
+        return {
+            "status": "success",
+            "message": "Session ending, consolidation started",
+            "session_info": summary.to_dict(),
+        }
+    
+    def end_session(self, user_id: str) -> dict:
+        """
+        显式结束用户的当前会话（v3.0，同步入口）
+        
+        仅用于无运行中 event loop 的上下文（如 pytest、CLI）。从
+        async handler（FastAPI、MCP）调用时请使用 end_session_async 并 await。
+        """
+        return asyncio.run(self.end_session_async(user_id))
+    
+    def _consolidate_session_sync(self, session) -> None:
+        """
+        同步版本的 Session 整合（用于回调）
+        
+        Args:
+            session: Session 对象
+        """
+        try:
+            result = self._get_consolidator().consolidate(session)
+            logger.info(f"Session {session.session_id} 整合完成: {result.to_dict()}")
+        except Exception as e:
+            logger.error(f"Session {session.session_id} 整合失败: {e}")
 
 
 # =============================================================================

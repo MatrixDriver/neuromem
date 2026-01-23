@@ -15,7 +15,7 @@ services:
     volumes:
       - ./neo4j_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:7474 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,6 +25,8 @@ services:
     image: qdrant/qdrant:latest
     container_name: memory_vector_db
     ports:
-      - "6333:6333" # API 端口
+      - "6400:6333" # API 端口（使用 6400 避免 Windows 保留端口冲突，6333 在保留范围 6296-6395 内）
     volumes:
       - ./qdrant_data:/qdrant/storage
+    # 官方镜像内无 curl/wget，暂不配置 healthcheck；依赖启动顺序与应用层调用失败做容错
+

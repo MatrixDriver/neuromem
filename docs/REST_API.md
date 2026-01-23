@@ -2,8 +2,8 @@
 
 > 基于 [v2.0 架构](ARCHITECTURE_V2.md) | 返回 [主架构文档](ARCHITECTURE.md)
 >
-> **版本**: v2.0  
-> **最后更新**: 2026-01-22
+> **版本**: v3.0  
+> **最后更新**: 2026-01-23
 
 ---
 
@@ -15,7 +15,9 @@
   - [处理记忆 (生产模式)](#1-处理记忆生产模式)
   - [处理记忆 (调试模式)](#2-处理记忆调试模式)
   - [获取用户知识图谱](#3-获取用户知识图谱)
-  - [健康检查](#4-健康检查)
+  - [结束会话](#4-结束会话)
+  - [获取会话状态](#5-获取会话状态)
+  - [健康检查](#6-健康检查)
 - [响应格式](#响应格式)
 - [错误处理](#错误处理)
 - [使用示例](#使用示例)
@@ -102,30 +104,31 @@ Content-Type: application/json
 }
 ```
 
-#### 响应示例（有记忆）
+#### 响应示例（有记忆，v3 格式）
 
 ```json
 {
     "status": "success",
-    "vector_chunks": [
+    "resolved_query": "小朱的女儿叫什么？",
+    "memories": [
         {
-            "memory": "灿灿还有一个弟弟，叫帅帅",
+            "content": "灿灿还有一个弟弟，叫帅帅",
             "score": 0.87
         },
         {
-            "memory": "小朱有两个孩子",
+            "content": "小朱有两个孩子",
             "score": 0.82
         }
     ],
-    "graph_relations": [
+    "relations": [
         {
             "source": "小朱",
-            "relationship": "女儿",
+            "relation": "女儿",
             "target": "灿灿"
         },
         {
             "source": "灿灿",
-            "relationship": "弟弟",
+            "relation": "弟弟",
             "target": "帅帅"
         }
     ],
@@ -141,8 +144,9 @@ Content-Type: application/json
 ```json
 {
     "status": "success",
-    "vector_chunks": [],
-    "graph_relations": [],
+    "resolved_query": "小朱的女儿叫什么？",
+    "memories": [],
+    "relations": [],
     "metadata": {
         "retrieval_time_ms": 15,
         "has_memory": false
@@ -155,13 +159,14 @@ Content-Type: application/json
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `status` | string | 处理状态：`success` 或 `error` |
-| `vector_chunks` | array | 向量检索匹配的记忆片段 |
-| `vector_chunks[].memory` | string | 记忆内容 |
-| `vector_chunks[].score` | number | 相似度分数 (0-1) |
-| `graph_relations` | array | 知识图谱中的关系三元组 |
-| `graph_relations[].source` | string | 关系起点实体 |
-| `graph_relations[].relationship` | string | 关系类型 |
-| `graph_relations[].target` | string | 关系终点实体 |
+| `resolved_query` | string | 指代消解后的查询（便于调试） |
+| `memories` | array | 语义检索匹配的记忆片段 |
+| `memories[].content` | string | 记忆内容 |
+| `memories[].score` | number | 相似度分数 (0-1) |
+| `relations` | array | 知识图谱中的关系三元组 |
+| `relations[].source` | string | 关系起点实体 |
+| `relations[].relation` | string | 关系类型 |
+| `relations[].target` | string | 关系终点实体 |
 | `metadata.retrieval_time_ms` | number | 检索耗时（毫秒） |
 | `metadata.has_memory` | boolean | 是否检索到相关记忆 |
 
@@ -170,6 +175,8 @@ Content-Type: application/json
 ### 2. 处理记忆（调试模式）
 
 返回详细的处理过程报告（自然语言格式），用于开发调试和验证系统行为。
+
+**注意：** 调试模式走**旧版流程**，不与生产模式一致：**不写 Session、不做指代消解**，仅演示「检索 + 隐私分类 + 存储决策」；用于观察分类与存储行为时使用。生产级流程（Session、指代消解、v3 格式）请使用 `POST /process`。
 
 #### 请求
 
@@ -274,7 +281,99 @@ GET /graph/{user_id}
 
 ---
 
-### 4. 健康检查
+### 4. 结束会话
+
+显式结束用户的当前会话，后台触发短期记忆整合为长期记忆。接口立即返回，整合过程异步执行。
+
+#### 请求
+
+```
+POST /end-session
+Content-Type: application/json
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `user_id` | string | ✅ | 用户唯一标识 |
+
+#### 请求示例
+
+```json
+{
+    "user_id": "user_001"
+}
+```
+
+#### 响应示例（有活跃会话）
+
+```json
+{
+    "status": "success",
+    "message": "Session ending, consolidation started",
+    "session_info": {
+        "session_id": "sess_abc123",
+        "event_count": 5,
+        "duration_seconds": 300,
+        "created_at": "2026-01-23T10:00:00",
+        "ended_at": "2026-01-23T10:05:00"
+    }
+}
+```
+
+#### 响应示例（无活跃会话）
+
+```json
+{
+    "status": "success",
+    "message": "No active session",
+    "session_info": null
+}
+```
+
+---
+
+### 5. 获取会话状态
+
+获取用户当前会话状态（调试用）。
+
+#### 请求
+
+```
+GET /session-status/{user_id}
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `user_id` | path | ✅ | 用户唯一标识 |
+
+#### 响应示例（有活跃会话）
+
+```json
+{
+    "status": "success",
+    "has_active_session": true,
+    "session_info": {
+        "event_count": 3,
+        "created_at": "2026-01-23T10:00:00",
+        "last_active_at": "2026-01-23T10:05:00",
+        "time_until_timeout_seconds": 1500
+    }
+}
+```
+
+#### 响应示例（无活跃会话）
+
+```json
+{
+    "status": "success",
+    "has_active_session": false,
+    "session_info": null
+}
+```
+
+---
+
+### 6. 健康检查
 
 检查服务运行状态，用于负载均衡器和容器编排的健康探测。
 
@@ -319,13 +418,14 @@ GET /health
 
 NeuroMemory 采用**静默降级**策略，确保不影响主流程 LLM 的运行。
 
-### 错误响应示例
+### 错误响应示例（v3 格式）
 
 ```json
 {
     "status": "error",
-    "vector_chunks": [],
-    "graph_relations": [],
+    "resolved_query": "用户原始输入",
+    "memories": [],
+    "relations": [],
     "metadata": {
         "retrieval_time_ms": 0,
         "has_memory": false,
@@ -368,6 +468,14 @@ curl -X POST http://localhost:8765/debug \
 # 获取知识图谱
 curl http://localhost:8765/graph/user_001
 
+# 结束会话
+curl -X POST http://localhost:8765/end-session \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "user_001"}'
+
+# 获取会话状态
+curl http://localhost:8765/session-status/user_001
+
 # 健康检查
 curl http://localhost:8765/health
 ```
@@ -392,10 +500,10 @@ result = process_memory("我女儿灿灿今年5岁了", "user_001")
 
 if result["metadata"]["has_memory"]:
     print("找到相关记忆:")
-    for chunk in result["vector_chunks"]:
-        print(f"  - {chunk['memory']} (score: {chunk['score']})")
-    for rel in result["graph_relations"]:
-        print(f"  - {rel['source']} --[{rel['relationship']}]--> {rel['target']}")
+    for m in result["memories"]:
+        print(f"  - {m['content']} (score: {m['score']})")
+    for rel in result["relations"]:
+        print(f"  - {rel['source']} --[{rel['relation']}]--> {rel['target']}")
 else:
     print("没有找到相关记忆")
 ```
@@ -478,14 +586,14 @@ NeuroMemory 可以作为 DIFY 工作流的外部 HTTP 节点使用，为对话�
 {% if http_result.metadata.has_memory %}
 以下是用户的相关记忆，请参考这些信息回答：
 
-向量记忆：
-{% for chunk in http_result.vector_chunks %}
-- {{ chunk.memory }}
+记忆：
+{% for m in http_result.memories %}
+- {{ m.content }}
 {% endfor %}
 
 知识图谱：
-{% for rel in http_result.graph_relations %}
-- {{ rel.source }} 的 {{ rel.relationship }} 是 {{ rel.target }}
+{% for rel in http_result.relations %}
+- {{ rel.source }} 的 {{ rel.relation }} 是 {{ rel.target }}
 {% endfor %}
 {% endif %}
 

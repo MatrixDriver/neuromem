@@ -293,9 +293,9 @@ class TestMultiHopRetrieval:
         # 检索
         result = brain.search("查询", unique_user_id)
         
-        # 验证
+        # 验证（v3 格式：memories、relations）
         assert result["metadata"]["has_memory"]
-        assert len(result["vector_chunks"]) > 0
+        assert len(result.get("memories", [])) > 0
 ```
 
 ---
@@ -304,16 +304,17 @@ class TestMultiHopRetrieval:
 
 ### 只检索，不推理
 
-v2 中 NeuroMemory 只负责检索，返回结构化 JSON：
+v2/v3 中 NeuroMemory 只负责检索，返回结构化 JSON（v3 格式）：
 
 ```json
 {
     "status": "success",
-    "vector_chunks": [
-        {"memory": "灿灿还有一个弟弟叫帅帅", "score": 0.87}
+    "resolved_query": "消解后的查询",
+    "memories": [
+        {"content": "灿灿还有一个弟弟叫帅帅", "score": 0.87}
     ],
-    "graph_relations": [
-        {"source": "灿灿", "relationship": "弟弟", "target": "帅帅"}
+    "relations": [
+        {"source": "灿灿", "relation": "弟弟", "target": "帅帅"}
     ],
     "metadata": {
         "retrieval_time_ms": 123,

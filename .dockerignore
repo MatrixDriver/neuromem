@@ -1,0 +1,64 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+.venv.bak/
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+
+# 测试
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# 文档
+docs/
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 数据目录（开发环境）
+neo4j_data/
+qdrant_data/
+
+# 临时文件
+*.log
+*.tmp
+*.bak
+
+# 环境变量文件（密钥）
+.env
+.env.*
+!.env.example
+!.env.zeabur
+
+# 测试结果
+test-results.txt
+
+# .agents 目录（Claude Code 临时文件）
+.agents/
+
+# 计划文件（Claude Code）
+*.md
+!README.md
+!CLAUDE.md

@@ -234,10 +234,10 @@ class TestPrivateBrain:
         
         result = brain.process("测试查询", unique_user_id)
         
-        # 验证必要字段存在
+        # 验证必要字段存在（v3 格式: memories / relations）
         assert "status" in result
-        assert "vector_chunks" in result
-        assert "graph_relations" in result
+        assert "memories" in result
+        assert "relations" in result
         assert "metadata" in result
         
         # 验证 metadata 结构
@@ -272,16 +272,18 @@ class TestPrivateBrain:
         # 添加记忆
         add_result = brain.add("小明喜欢打篮球", unique_user_id)
         assert add_result["status"] == "success"
+        assert "memory_id" in add_result
         print(f"添加结果: {add_result}")
         
         # 等待索引更新
         time.sleep(2)
         
-        # 搜索记忆
-        search_result = brain.search("小明的爱好是什么", unique_user_id)
+        # 搜索记忆（limit=1 校验）
+        search_result = brain.search("小明的爱好是什么", unique_user_id, limit=1)
         print(f"搜索结果: {search_result}")
         
         assert search_result["status"] == "success"
+        assert len(search_result.get("memories", [])) <= 1
 
     @pytest.mark.slow
     def test_get_user_graph(self, brain, unique_user_id):
@@ -299,6 +301,8 @@ class TestPrivateBrain:
         assert graph["status"] == "success"
         assert "memories" in graph
         assert "graph_relations" in graph
+        assert "nodes" in graph
+        assert "edges" in graph
 
 
 # =============================================================================
@@ -340,9 +344,9 @@ class TestYSplitFlow:
         print(f"\n>>> 搜索查询: {search_query}")
         print(f">>> 搜索结果: {search_result}")
         
-        # 应该有记忆
+        # 应该有记忆（v3 格式: memories）
         has_memory = search_result["metadata"]["has_memory"]
-        has_chunks = len(search_result["vector_chunks"]) > 0
+        has_chunks = len(search_result["memories"]) > 0
         
         if not (has_memory or has_chunks):
             # 如果第一次搜索没找到，尝试使用原文再搜索一次
@@ -350,7 +354,7 @@ class TestYSplitFlow:
             search_result = brain.search(private_text, unique_user_id)
             print(f">>> 原文搜索结果: {search_result}")
             has_memory = search_result["metadata"]["has_memory"]
-            has_chunks = len(search_result["vector_chunks"]) > 0
+            has_chunks = len(search_result["memories"]) > 0
         
         assert has_memory or has_chunks, f"存储后应能检索到记忆，但搜索结果为空"
 
@@ -450,35 +454,38 @@ class TestMultiHopRetrieval:
         
         result = brain.search(query, unique_user_id)
         print(f"\n检索结果:")
-        print(f"  - 向量记忆数: {len(result['vector_chunks'])}")
-        print(f"  - 图谱关系数: {len(result['graph_relations'])}")
+        print(f"  - 向量记忆数: {len(result['memories'])}")
+        print(f"  - 图谱关系数: {len(result['relations'])}")
         
-        # 打印向量记忆
-        if result['vector_chunks']:
+        # 打印向量记忆（v3: memories，字段 content）
+        if result['memories']:
             print("\n  向量记忆:")
-            for chunk in result['vector_chunks']:
-                print(f"    - {chunk['memory']} (score: {chunk['score']:.2f})")
+            for chunk in result['memories']:
+                text = chunk.get("content", chunk.get("memory", ""))
+                score = chunk.get("score", 0)
+                print(f"    - {text} (score: {score:.2f})")
         
-        # 打印图谱关系
-        if result['graph_relations']:
+        # 打印图谱关系（v3: relations，字段 relation）
+        if result['relations']:
             print("\n  图谱关系:")
-            for rel in result['graph_relations']:
-                print(f"    - {rel['source']} --[{rel['relationship']}]--> {rel['target']}")
+            for rel in result['relations']:
+                r = rel.get("relation", rel.get("relationship", "?"))
+                print(f"    - {rel['source']} --[{r}]--> {rel['target']}")
         
         # 验证检索到了相关信息
         assert result["metadata"]["has_memory"], "应该检索到相关记忆"
         
-        # 验证检索结果中包含关键信息
+        # 验证检索结果中包含关键信息（v3: memories / content）
         all_text = " ".join([
-            chunk.get("memory", "") 
-            for chunk in result["vector_chunks"]
+            chunk.get("content", chunk.get("memory", ""))
+            for chunk in result["memories"]
         ])
         
         # 应该能检索到与帅帅或弟弟相关的信息
         has_relevant_info = (
-            "帅帅" in all_text or 
+            "帅帅" in all_text or
             "弟弟" in all_text or
-            len(result["graph_relations"]) > 0
+            len(result["relations"]) > 0
         )
         
         print(f"\n✓ 检索到相关信息: {has_relevant_info}")
@@ -505,8 +512,8 @@ class TestPerformance:
         print(f"检索耗时: {elapsed:.2f}s")
         print(f"返回的检索时间: {result['metadata']['retrieval_time_ms']}ms")
         
-        # 检索应在 5 秒内完成
-        assert elapsed < 5, f"检索时间过长: {elapsed:.2f}s"
+        # 检索应在 10 秒内完成（放宽以应对网络/API 波动）
+        assert elapsed < 10, f"检索时间过长: {elapsed:.2f}s"
 
     @pytest.mark.slow
     def test_process_response_time(self, brain, unique_user_id):
