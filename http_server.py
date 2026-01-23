@@ -149,6 +149,21 @@ class HealthV1Response(BaseModel):
 # API 端点
 # =============================================================================
 
+
+@app.get("/", summary="根路由")
+def read_root() -> dict:
+    """
+    根路径，用于 Zeabur 等平台的存活探测及直接访问。
+    避免未定义根路由时返回 404，被网关误判为 502。
+    """
+    return {
+        "service": "neuro-memory",
+        "version": "3.0.0",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
 @app.post("/process", summary="处理记忆（生产模式）")
 async def process_memory(request: ProcessRequest) -> dict:
     """
