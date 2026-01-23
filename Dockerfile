@@ -7,8 +7,10 @@ WORKDIR /app
 # 安装 uv（更快的依赖安装工具）
 RUN pip install --no-cache-dir uv
 
-# 复制依赖文件
+# 复制所有源代码和依赖文件
 COPY pyproject.toml uv.lock ./
+COPY neuromemory/ ./neuromemory/
+COPY config.py private_brain.py session_manager.py coreference.py consolidator.py privacy_filter.py health_checks.py http_server.py mcp_server.py main.py ./
 
 # 安装依赖（不包含 dev 依赖，减小镜像体积）
 RUN uv pip install --system --no-cache-dir -e .
