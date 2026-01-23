@@ -11,10 +11,19 @@ load_dotenv(Path(__file__).parent / ".env")
 
 # =============================================================================
 # API 密钥配置
+# 兼容本地开发（下划线）和 ZeaBur（短横线）
 # =============================================================================
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
+def _get_env_var(*names: str, default: str = "") -> str:
+    """按优先级读取环境变量，支持多种命名格式"""
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+GOOGLE_API_KEY = _get_env_var("GOOGLE_API_KEY", "GOOGLE-API-KEY", default="")
+DEEPSEEK_API_KEY = _get_env_var("DEEPSEEK_API_KEY", "DeepSeek-ApiKey", default="")
+SILICONFLOW_API_KEY = _get_env_var("SILICONFLOW_API_KEY", "SiliconFlow-ApiKey", default="")
 
 # 设置环境变量供 SDK 使用
 if GOOGLE_API_KEY:
@@ -134,8 +143,8 @@ MEM0_CONFIG: dict = {
     "vector_store": {
         "provider": "qdrant",
         "config": {
-            "host": "localhost",
-            "port": 6400,  # 使用 6400 避免 Windows 保留端口冲突（6333 在保留范围 6296-6395 内）
+            "host": os.getenv("QDRANT_HOST", "localhost"),
+            "port": int(os.getenv("QDRANT_PORT", "6400")),
             "collection_name": _get_collection_name(),
             "embedding_model_dims": _get_embedder_config()["config"]["embedding_dims"],  # 明确指定向量维度
         },
@@ -146,12 +155,17 @@ MEM0_CONFIG: dict = {
 
 # 图谱存储配置
 if ENABLE_GRAPH_STORE:
+    # Neo4j 连接配置（支持环境变量）
+    neo4j_url = os.getenv("NEO4J_URL", "neo4j://localhost:17687")
+    neo4j_username = os.getenv("NEO4J_USERNAME", "neo4j")
+    neo4j_password = _get_env_var("NEO4J_PASSWORD", "Neo4j-Password", "NEO4J-PASSWORD", default="password123")
+
     MEM0_CONFIG["graph_store"] = {
         "provider": "neo4j",
         "config": {
-            "url": "neo4j://localhost:17687",
-            "username": "neo4j",
-            "password": "password123",
+            "url": neo4j_url,
+            "username": neo4j_username,
+            "password": neo4j_password,
         },
     }
 

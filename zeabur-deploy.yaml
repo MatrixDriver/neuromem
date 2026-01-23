@@ -16,16 +16,16 @@ services:
 
       # LLM 配置 - DeepSeek（生产环境推荐）
       LLM_PROVIDER: deepseek
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DeepSeek-ApiKey: # 在 ZeaBur 控制台添加此变量
 
       # Embedding 配置 - SiliconFlow（成本更低）
       EMBEDDING_PROVIDER: siliconflow
-      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
+      SiliconFlow-ApiKey: # 在 ZeaBur 控制台添加此变量
 
       # 数据库连接配置（使用 ZeaBur 服务发现）
       NEO4J_URL: neo4j://{{ neo4j-neuromemory.host }}:17687
       NEO4J_USERNAME: neo4j
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      Neo4j-Password: # 在 ZeaBur 控制台添加此变量
       QDRANT_HOST: {{ qdrant-neuromemory.host }}
       QDRANT_PORT: 6400
 
@@ -71,7 +71,7 @@ services:
 
     env:
       # 认证配置
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      NEO4J_AUTH: neo4j/{{ neo4j-neuromemory.env.Neo4j-Password }}
 
       # 启用插件
       NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
