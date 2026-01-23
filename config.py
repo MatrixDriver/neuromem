@@ -11,7 +11,7 @@ load_dotenv(Path(__file__).parent / ".env")
 
 # =============================================================================
 # API 密钥配置
-# 兼容本地开发（下划线）和 ZeaBur（短横线）
+# 兼容本地开发（下划线）和 ZeaBur（驼峰命名）
 # =============================================================================
 def _get_env_var(*names: str, default: str = "") -> str:
     """按优先级读取环境变量，支持多种命名格式"""
@@ -21,9 +21,9 @@ def _get_env_var(*names: str, default: str = "") -> str:
             return value
     return default
 
-GOOGLE_API_KEY = _get_env_var("GOOGLE_API_KEY", "GOOGLE-API-KEY", default="")
-DEEPSEEK_API_KEY = _get_env_var("DEEPSEEK_API_KEY", "DeepSeek-ApiKey", default="")
-SILICONFLOW_API_KEY = _get_env_var("SILICONFLOW_API_KEY", "SiliconFlow-ApiKey", default="")
+GOOGLE_API_KEY = _get_env_var("GOOGLE_API_KEY", "GoogleApiKey", default="")
+DEEPSEEK_API_KEY = _get_env_var("DEEPSEEK_API_KEY", "DeepSeekApiKey", default="")
+SILICONFLOW_API_KEY = _get_env_var("SILICONFLOW_API_KEY", "SiliconFlowApiKey", default="")
 
 # 设置环境变量供 SDK 使用
 if GOOGLE_API_KEY:
@@ -158,7 +158,7 @@ if ENABLE_GRAPH_STORE:
     # Neo4j 连接配置（支持环境变量）
     neo4j_url = os.getenv("NEO4J_URL", "neo4j://localhost:17687")
     neo4j_username = os.getenv("NEO4J_USERNAME", "neo4j")
-    neo4j_password = _get_env_var("NEO4J_PASSWORD", "Neo4j-Password", "NEO4J-PASSWORD", default="password123")
+    neo4j_password = _get_env_var("NEO4J_PASSWORD", "Neo4jPassword", default="password123")
 
     MEM0_CONFIG["graph_store"] = {
         "provider": "neo4j",
