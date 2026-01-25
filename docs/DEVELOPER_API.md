@@ -1,6 +1,6 @@
 # NeuroMemory 开发者接口文档
 
-> 面向项目开发者的高级接口文档 | 基于 [v2.0 架构](ARCHITECTURE_V2.md) | 返回 [主架构文档](ARCHITECTURE.md)
+> 面向项目开发者的高级接口文档 | 返回 [主架构文档](ARCHITECTURE.md)
 >
 > **版本**: v3.0  
 > **最后更新**: 2026-01-24
@@ -287,28 +287,26 @@ curl "http://localhost:8765/api/v1/graph?user_id=test_user&depth=2"
     "status": "success",
     "user_id": "test_user",
     "nodes": [
-        {"id": "n1", "label": "张三", "type": "PERSON"},
-        {"id": "n2", "label": "李四", "type": "PERSON"},
-        {"id": "n3", "label": "技术部门", "type": "ORG"}
+        {"id": "张三", "name": "张三"},
+        {"id": "李四", "name": "李四"},
+        {"id": "技术部门", "name": "技术部门"}
     ],
     "edges": [
-        {"source": "n1", "target": "n2", "relation": "管理"},
-        {"source": "n1", "target": "n3", "relation": "属于"}
+        {"source": "张三", "relationship": "管理", "target": "李四"},
+        {"source": "张三", "relationship": "属于", "target": "技术部门"}
     ],
     "memories": [
         {
             "id": "mem_001",
-            "content": "张三是技术部门的负责人",
-            "created_at": "2026-01-20T10:30:00Z"
+            "memory": "张三是技术部门的负责人"
         }
     ],
     "graph_relations": [
         {"source": "张三", "relationship": "管理", "target": "李四"}
     ],
     "metadata": {
-        "total_memories": 1,
-        "total_nodes": 3,
-        "total_edges": 2
+        "memory_count": 1,
+        "relation_count": 1
     }
 }
 ```
@@ -317,11 +315,11 @@ curl "http://localhost:8765/api/v1/graph?user_id=test_user&depth=2"
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `nodes` | array | 图谱节点列表 |
-| `edges` | array | 图谱边列表 |
-| `memories` | array | 相关记忆列表 |
-| `graph_relations` | array | 图谱关系三元组 |
-| `metadata` | object | 统计信息 |
+| `nodes` | array | 图谱节点列表，每个节点包含 `id` 和 `name` |
+| `edges` | array | 图谱边列表，每个边包含 `source`、`relationship`、`target` |
+| `memories` | array | 相关记忆列表，每个记忆包含 `id` 和 `memory` |
+| `graph_relations` | array | 图谱关系三元组，每个关系包含 `source`、`relationship`、`target` |
+| `metadata` | object | 统计信息，包含 `memory_count` 和 `relation_count` |
 
 ---
 
@@ -447,8 +445,7 @@ print(f"来源: {len(result['sources'])} 条记忆")
 ## 相关文档
 
 - [用户接口文档](USER_API.md) - 面向普通客户的接口文档
-- [接口总览](API.md) - 查看所有接口类型（Python SDK、REST API、CLI）
-- [v2.0 架构设计](ARCHITECTURE_V2.md) - 了解系统架构
+- [接口总览](API.md) - 查看所有接口类型（REST API、CLI）
 - [快速开始](GETTING_STARTED.md) - 环境配置和启动
 
 ---

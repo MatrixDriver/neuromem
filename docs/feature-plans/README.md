@@ -50,5 +50,5 @@
 
 - [工程推进流程指南](../ENGINEERING_WORKFLOW.md) — core_piv_loop、validation、create-prd 等命令的用法与顺序
 - [主架构文档](../ARCHITECTURE.md)
-- [v2.0 架构文档](../ARCHITECTURE_V2.md)
+- [主架构文档](../ARCHITECTURE.md)
 - [Session 记忆管理设计文档](../SESSION_MEMORY_DESIGN.md)

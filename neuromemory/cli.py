@@ -5,6 +5,7 @@ NeuroMemory CLI - Typer 入口
 """
 
 import json
+import sys
 import tempfile
 import webbrowser
 from pathlib import Path
@@ -13,7 +14,7 @@ from typing import Optional
 import typer
 
 from health_checks import check_llm_config, check_neo4j, check_qdrant
-from neuromemory import NeuroMemory
+from private_brain import get_brain
 
 app = typer.Typer()
 graph_app = typer.Typer()
@@ -37,9 +38,12 @@ def add(
     user: str = typer.Option("default", "--user", "-u"),
 ) -> None:
     """添加记忆。"""
-    m = NeuroMemory()
-    mid = m.add(content, user_id=user)
-    typer.echo(mid)
+    brain = get_brain()
+    result = brain.add(content, user_id=user)
+    if result.get("status") == "error":
+        typer.echo(f"错误: {result.get('error', '添加失败')}", err=True)
+        sys.exit(1)
+    typer.echo(result["memory_id"])
 
 
 @app.command()
@@ -49,9 +53,9 @@ def search(
     limit: int = typer.Option(10, "--limit", "-l"),
 ) -> None:
     """混合检索记忆。"""
-    m = NeuroMemory()
-    d = m.search(query, user_id=user, limit=limit)
-    typer.echo(json.dumps(d, ensure_ascii=False, indent=2))
+    brain = get_brain()
+    result = brain.search(query, user_id=user, limit=limit)
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 @app.command()
@@ -60,9 +64,12 @@ def ask(
     user: str = typer.Option("default", "--user", "-u"),
 ) -> None:
     """基于记忆回答问题。"""
-    m = NeuroMemory()
-    a = m.ask(question, user_id=user)
-    typer.echo(a)
+    brain = get_brain()
+    result = brain.ask(question, user_id=user)
+    if result.get("error"):
+        typer.echo(f"错误: {result['error']}", err=True)
+        sys.exit(1)
+    typer.echo(result["answer"])
 
 
 @graph_app.command("export")
@@ -71,9 +78,9 @@ def graph_export(
     output: Optional[str] = typer.Option(None, "--output", "-o"),
 ) -> None:
     """导出知识图谱为 JSON（默认 stdout）。"""
-    m = NeuroMemory()
-    g = m.get_graph(user_id=user)
-    s = json.dumps(g, ensure_ascii=False, indent=2)
+    brain = get_brain()
+    graph = brain.get_user_graph(user_id=user)
+    s = json.dumps(graph, ensure_ascii=False, indent=2)
     if output:
         Path(output).write_text(s, encoding="utf-8")
     else:
@@ -86,8 +93,8 @@ def graph_visualize(
     open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
 ) -> None:
     """生成知识图谱 HTML 并用浏览器打开。"""
-    m = NeuroMemory()
-    g = m.get_graph(user_id=user)
+    brain = get_brain()
+    g = brain.get_user_graph(user_id=user)
     nodes = [
         {"id": n["id"], "label": n.get("name", n["id"])}
         for n in g.get("nodes", [])

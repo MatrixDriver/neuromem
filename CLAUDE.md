@@ -51,14 +51,15 @@ pytest -m "not slow"                      # 跳过 LLM 调用的测试
 pytest tests/test_cognitive.py::TestPrivacyFilter  # 运行特定测试类
 ```
 
-### Python SDK / CLI
+### CLI 工具
 
 `uv pip install -e .` 或 `pip install -e .` 后可使用：
 
-- **SDK**：`from neuromemory import NeuroMemory`；`m = NeuroMemory()`；`m.add(...)` / `m.search(...)` / `m.ask(...)` / `m.get_graph(...)`
 - **CLI**：`neuromemory status`、`neuromemory add "..." --user <user>`、`neuromemory graph export --user <user>`、`neuromemory graph visualize` 等
 
 **排错**：若 `neuromemory` 报 `ModuleNotFoundError: No module named 'private_brain'`，检查 `pyproject.toml` 的 `[tool.setuptools]` 是否包含 `py-modules = ["config","private_brain","session_manager","coreference","consolidator","privacy_filter","health_checks"]`，并重新执行 `uv pip install -e .`。
+
+**注意**：主要接口为 REST API（`POST /process`），详见 `docs/USER_API.md`。CLI 工具仅用于调试和演示。
 
 ### 验证命令与 Shell
 
@@ -83,7 +84,7 @@ pytest tests/test_cognitive.py::TestPrivacyFilter  # 运行特定测试类
 | 文件 | 职责 |
 |------|------|
 | `private_brain.py` | 核心类 `PrivateBrain`，实现 Y 型分流架构 |
-| `neuromemory/` | Python SDK（`NeuroMemory`）与 CLI（`neuromemory` 命令），封装 `get_brain()` |
+| `neuromemory/` | CLI（`neuromemory` 命令），直接使用 `get_brain()` |
 | `privacy_filter.py` | LLM 隐私分类器（PRIVATE/PUBLIC） |
 | `http_server.py` | FastAPI REST API 入口 |
 | `mcp_server.py` | MCP Server 入口（Cursor/Claude Desktop 集成） |
@@ -130,7 +131,7 @@ SILICONFLOW_API_KEY=your-siliconflow-api-key
 
 ## 架构说明
 
-详细架构设计参见 `docs/ARCHITECTURE.md` 和 `docs/ARCHITECTURE_V2.md`。
+详细架构设计参见 `docs/ARCHITECTURE.md`。
 
 ## 工程推进流程
 

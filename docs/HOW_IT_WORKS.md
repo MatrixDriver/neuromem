@@ -394,7 +394,7 @@ answer = cognitive_process(brain, "小朱的儿子叫什么名字？", user_id="
 | [Mem0 深度解析](MEM0_DEEP_DIVE.md) | Mem0 框架原理、API 详解 |
 | [核心组件](COMPONENTS.md) | 各组件技术细节 |
 | [配置参考](CONFIGURATION.md) | 环境变量、模型切换 |
-| [接口设计](API.md) | Python SDK、REST API |
+| [接口设计](API.md) | REST API、CLI |
 
 ---
 

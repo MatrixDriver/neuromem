@@ -9,8 +9,12 @@
 - **混合记忆架构**: 结合 Neo4j 知识图谱与 Qdrant 向量数据库，同时处理结构化逻辑和模糊语义
 - **多跳推理**: 通过图谱路径实现复杂的实体关系推理，如 `Demis → DeepMind → Gemini`
 - **自动知识提取**: 利用 LLM 自动从对话中提取实体关系并构建知识图谱
+- **Session 管理 (v3.0)**: 内部自动管理短期记忆，超时自动整合为长期记忆
+- **指代消解 (v3.0)**: 检索时规则匹配，整合时 LLM 消解，支持跨轮次指代
+- **隐私过滤 (v3.0)**: LLM 分类 PRIVATE/PUBLIC，只存储私有数据
 - **灵活的模型切换**: 支持 DeepSeek / Gemini 作为推理引擎，本地 HuggingFace / Gemini / SiliconFlow 作为 Embedding
 - **记忆演化**: 知识图谱具有自我纠错能力，随使用时间形成致密的专家知识网络
+- **多种接入方式**: REST API、CLI 工具、MCP Server
 
 ## 架构设计
 
@@ -43,13 +47,13 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 认知流程
+### 认知流程 (v3.0)
 
-1. **预处理 (Preprocessing)**: 身份提取 + 代词消解（"我的儿子" → "小朱的儿子"）
-2. **意图判断 (Intent Classification)**: LLM 判断 personal/factual/general 意图
-3. **混合检索 (Hybrid Retrieval)**: 并行执行向量搜索和图谱遍历
-4. **深度推理 (System 2 Thinking)**: LLM 基于知识网络进行多跳推理
-5. **异步记忆整合 (Async Consolidation)**: 后台线程池异步执行，用户无需等待
+1. **Session 管理**: 自动获取或创建 Session，管理短期记忆
+2. **指代消解（检索时）**: 规则匹配，快速消解代词（"这个"→名词、"她/他"→人名）
+3. **混合检索**: 并行执行向量搜索和图谱遍历，返回 v3 格式结果
+4. **返回结果**: 立即返回 `memories`、`relations`、`resolved_query`
+5. **Session 整合（后台）**: Session 超时或显式结束时，LLM 消解 + 隐私过滤 + 存储
 
 ## 技术栈
 
@@ -162,38 +166,89 @@ ENABLE_GRAPH_STORE = True
 
 ## 使用示例
 
-```python
-from mem0 import Memory
-from config import MEM0_CONFIG
+### REST API（推荐）
 
-# 初始化混合记忆系统
-brain = Memory.from_config(MEM0_CONFIG)
+```bash
+# 启动服务
+uvicorn http_server:app --host 0.0.0.0 --port 8765 --reload
 
-# 添加知识
-brain.add("DeepMind 是 Google 的子公司。", user_id="user_001")
-brain.add("Demis Hassabis 是 DeepMind 的 CEO。", user_id="user_001")
-brain.add("Gemini 是 DeepMind 团队研发的。", user_id="user_001")
+# 存储记忆
+curl -X POST http://localhost:8765/process \
+  -H "Content-Type: application/json" \
+  -d '{"input": "DeepMind 是 Google 的子公司", "user_id": "user_001"}'
 
-# 混合检索 - 同时查询向量库和知识图谱
-results = brain.search("Demis Hassabis 和 Gemini 有什么关系？", user_id="user_001")
+# 查询记忆
+curl -X POST http://localhost:8765/process \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Demis Hassabis 和 Gemini 有什么关系？", "user_id": "user_001"}'
+```
 
-# 系统会通过图谱路径推理出:
-# Demis Hassabis → CEO of → DeepMind → Created → Gemini
+详细文档请参考 [用户接口文档](docs/USER_API.md)。
+
+### REST API
+
+```bash
+# 处理记忆（生产模式，v3.0）
+curl -X POST http://localhost:8765/process \
+  -H "Content-Type: application/json" \
+  -d '{"input": "我女儿叫灿灿，今年5岁了", "user_id": "user_001"}'
+
+# 查询记忆
+curl -X POST http://localhost:8765/process \
+  -H "Content-Type: application/json" \
+  -d '{"input": "我女儿叫什么名字？", "user_id": "user_001"}'
+
+# 获取知识图谱
+curl http://localhost:8765/graph/user_001
+```
+
+### CLI 工具
+
+```bash
+# 安装后使用
+uv pip install -e .
+
+# 检查状态
+neuromemory status
+
+# 添加记忆
+neuromemory add "DeepMind 是 Google 的子公司" --user user_001
+
+# 检索记忆
+neuromemory search "Google 有哪些子公司" --user user_001 --limit 5
+
+# 基于记忆回答问题
+neuromemory ask "Demis 和 Gemini 有什么关系" --user user_001
+
+# 导出知识图谱
+neuromemory graph export --user user_001 -o graph.json
+
+# 可视化知识图谱
+neuromemory graph visualize --user user_001 --open-browser
 ```
 
 ## 项目结构
 
 ```
 NeuroMemory/
-├── config.py          # 配置模块（模型切换、数据库连接）
-├── main.py            # 主程序（认知流程实现）
-├── requirements.txt   # Python 依赖
-├── docker-compose.yml # 数据库服务配置
-├── .env               # API 密钥（不提交到 Git）
-├── .venv/             # Python 虚拟环境
-├── neo4j_data/        # Neo4j 数据持久化
-├── qdrant_data/       # Qdrant 数据持久化
-└── 架构文档.md         # 详细架构设计文档
+├── config.py              # 配置模块（模型切换、数据库连接）
+├── private_brain.py       # 核心处理引擎（v3.0）
+├── session_manager.py     # Session 管理器（v3.0）
+├── coreference.py         # 指代消解器（v3.0）
+├── consolidator.py        # Session 整合器（v3.0）
+├── privacy_filter.py      # 隐私过滤器（v3.0）
+├── http_server.py         # REST API 服务（FastAPI）
+├── mcp_server.py          # MCP Server
+├── main.py                # CLI 演示工具
+├── neuromemory/           # CLI 工具
+│   ├── __init__.py        # 包初始化
+│   └── cli.py             # CLI 工具（Typer）
+├── docs/                  # 架构文档
+│   ├── ARCHITECTURE.md    # 主架构文档
+│   ├── API.md             # 接口设计
+│   └── ...
+├── docker-compose.yml     # 数据库服务配置
+└── .env                   # API 密钥（不提交到 Git）
 ```
 
 ## 为什么优于传统 RAG？
@@ -208,20 +263,27 @@ NeuroMemory/
 ## 常用命令
 
 ```bash
-# 启动服务
+# 启动数据库服务
 docker-compose up -d
 
 # 停止服务
 docker-compose down
 
-# 查看服务状态
-docker-compose ps
+# 安装 CLI 工具
+uv pip install -e .  # 或 pip install -e .
 
-# 查看日志
-docker-compose logs -f
+# 启动 HTTP Server（开发模式）
+uvicorn http_server:app --host 0.0.0.0 --port 8765 --reload
 
-# 运行主程序
+# 启动 HTTP Server（生产模式）
+uvicorn http_server:app --host 0.0.0.0 --port 8765 --workers 4
+
+# 运行 CLI 演示
 python main.py
+
+# 运行测试
+pytest                    # 全部测试
+pytest -m "not slow"      # 跳过 LLM 调用的测试
 ```
 
 ## License

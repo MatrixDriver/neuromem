@@ -112,8 +112,8 @@ isProject: false
 - [docs/SESSION_MEMORY_DESIGN.md](../SESSION_MEMORY_DESIGN.md) - **完整文档**
   - 特定部分：第 2-4 章（架构设计、数据结构、生命周期管理）
   - 原因：核心设计文档，包含所有实现细节
-- [docs/ARCHITECTURE_V2.md](../ARCHITECTURE_V2.md)
-  - 特定部分：第 5 章（隐私过滤器）
+- [docs/ARCHITECTURE.md](../ARCHITECTURE.md)
+  - 特定部分：2.3.1 隐私过滤器设计
   - 原因：了解隐私过滤的实现方式
 - [Python asyncio 文档](https://docs.python.org/3/library/asyncio.html)
   - 特定部分：Task 和 Lock 的使用

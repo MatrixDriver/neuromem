@@ -1,6 +1,6 @@
 # NeuroMemory 用户接口文档
 
-> 面向普通客户的用户接口文档 | 基于 [v2.0 架构](ARCHITECTURE_V2.md) | 返回 [主架构文档](ARCHITECTURE.md)
+> 面向普通客户的用户接口文档 | 返回 [主架构文档](ARCHITECTURE.md)
 >
 > **版本**: v3.0  
 > **最后更新**: 2026-01-24
@@ -262,29 +262,31 @@ GET /graph/{user_id}
     "memories": [
         {
             "id": "mem_001",
-            "content": "小朱有两个孩子",
-            "created_at": "2026-01-20T10:30:00Z"
+            "memory": "小朱有两个孩子"
         },
         {
             "id": "mem_002",
-            "content": "灿灿是小朱的女儿",
-            "created_at": "2026-01-20T10:31:00Z"
+            "memory": "灿灿是小朱的女儿"
         }
     ],
-    "entities": [
-        {"name": "小朱", "type": "PERSON"},
-        {"name": "灿灿", "type": "PERSON"},
-        {"name": "帅帅", "type": "PERSON"}
+    "graph_relations": [
+        {"source": "小朱", "relationship": "女儿", "target": "灿灿"},
+        {"source": "小朱", "relationship": "儿子", "target": "帅帅"},
+        {"source": "灿灿", "relationship": "弟弟", "target": "帅帅"}
     ],
-    "relations": [
+    "nodes": [
+        {"id": "小朱", "name": "小朱"},
+        {"id": "灿灿", "name": "灿灿"},
+        {"id": "帅帅", "name": "帅帅"}
+    ],
+    "edges": [
         {"source": "小朱", "relationship": "女儿", "target": "灿灿"},
         {"source": "小朱", "relationship": "儿子", "target": "帅帅"},
         {"source": "灿灿", "relationship": "弟弟", "target": "帅帅"}
     ],
     "metadata": {
-        "total_memories": 2,
-        "total_entities": 3,
-        "total_relations": 3
+        "memory_count": 2,
+        "relation_count": 3
     }
 }
 ```
@@ -635,10 +637,9 @@ NeuroMemory 可以作为 DIFY 工作流的外部 HTTP 节点使用，为对话�
 
 ## 相关文档
 
-- [v2.0 架构设计](ARCHITECTURE_V2.md) - 了解系统架构
 - [快速开始](GETTING_STARTED.md) - 环境配置和启动
 - [测试指南](TESTING.md) - 测试用例和方法
-- [接口总览](API.md) - 查看所有接口类型（Python SDK、REST API、CLI）
+- [接口总览](API.md) - 查看所有接口类型（REST API、CLI）
 - [开发者接口文档](DEVELOPER_API.md) - 高级接口（`/api/v1/*`）文档
 
 ---

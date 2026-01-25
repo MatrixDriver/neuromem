@@ -326,7 +326,7 @@
 
 - [CLAUDE.md](../CLAUDE.md) — 项目规则与常用命令
 - [feature-plans/README.md](feature-plans/README.md) — 特性开发文档规范
-- [ARCHITECTURE.md](ARCHITECTURE.md)、[ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) — 架构说明，供 prime / plan-feature 理解上下文
+- [ARCHITECTURE.md](ARCHITECTURE.md) — 架构说明，供 prime / plan-feature 理解上下文
 
 ---
 

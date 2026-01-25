@@ -143,29 +143,21 @@ answer = cognitive_process(brain, "张三管理什么项目？", user_id="test_u
 
 ---
 
-## 使用 SDK
+## 使用 REST API
 
-安装：`pip install -e .` 或 `uv pip install -e .`
+主要接口为 REST API，详见 [用户接口文档](USER_API.md)。
 
-```python
-from neuromemory import NeuroMemory
+```bash
+# 启动服务
+uvicorn http_server:app --host 0.0.0.0 --port 8765 --reload
 
-# 初始化
-memory = NeuroMemory()
-
-# 添加记忆
-memory.add("张三是李四的老板", user_id="test_user")
-memory.add("李四负责人工智能项目", user_id="test_user")
-
-# 检索
-results = memory.search("张三管理什么", user_id="test_user")
-
-# 问答
-answer = memory.ask("张三管理什么项目？", user_id="test_user")
-print(answer)
+# 使用 curl 调用
+curl -X POST http://localhost:8765/process \
+  -H "Content-Type: application/json" \
+  -d '{"input": "张三是李四的老板", "user_id": "test_user"}'
 ```
 
-## 使用 CLI
+## 使用 CLI（调试工具）
 
 ```bash
 neuromemory status

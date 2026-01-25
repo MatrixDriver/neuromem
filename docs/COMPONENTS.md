@@ -2,7 +2,8 @@
 
 > 返回 [主架构文档](ARCHITECTURE.md)
 >
-> **最后更新**: 2026-01
+> **版本**: v3.0
+> **最后更新**: 2026-01-24
 
 ---
 
@@ -10,14 +11,13 @@
 
 - [组件总览](#组件总览)
 - [配置模块 (config.py)](#配置模块-configpy)
-- [认知引擎 (main.py)](#认知引擎-mainpy)
-  - [异步记忆整合模块](#异步记忆整合模块)
-  - [代词消解模块](#代词消解模块)
-  - [图谱关系处理模块](#图谱关系处理模块)
-  - [意图判断模块](#意图判断模块)
-  - [LLM 工厂](#llm-工厂)
-  - [核心认知流程](#核心认知流程)
-- [Python SDK (NeuroMemory 类)](#python-sdk-neuromemory-类)
+- [核心处理引擎 (private_brain.py)](#核心处理引擎-private_brainpy)
+  - [检索流程](#检索流程)
+  - [Session 管理集成](#session-管理集成)
+- [Session 管理器 (session_manager.py)](#session-管理器-session_managerpy)
+- [指代消解器 (coreference.py)](#指代消解器-coreferencepy)
+- [Session 整合器 (consolidator.py)](#session-整合器-consolidatorpy)
+- [隐私过滤器 (privacy_filter.py)](#隐私过滤器-privacy_filterpy)
 - [Mem0 集成层](#mem0-集成层)
 
 ---
@@ -26,35 +26,41 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         组件依赖图                               │
+│                         组件依赖图 (v3.0)                        │
 └─────────────────────────────────────────────────────────────────┘
 
                     ┌───────────────────┐
-                    │   main.py         │
-                    │   (入口 & 演示)    │
+                    │  http_server.py   │
+                    │  mcp_server.py    │
+                    │  neuromemory/cli  │
+                    │  (接入层)          │
                     └─────────┬─────────┘
                               │
-    ┌─────────────┬───────────┼───────────┬─────────────┐
-    │             │           │           │             │
-    ▼             ▼           ▼           ▼             ▼
-┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌───────────────┐
-│ 异步    │ │ 代词    │ │ 图谱    │ │ 意图    │ │ cognitive_    │
-│ 记忆    │ │ 消解    │ │ 关系    │ │ 判断    │ │ process()     │
-│ 整合    │ │ 模块    │ │ 处理    │ │ 模块    │ │               │
-└────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘ └───────┬───────┘
-     │           │           │           │             │
-     └───────────┴───────────┴───────────┴─────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              │               │               │
-              ▼               ▼               ▼
-    ┌─────────────────┐ ┌───────────┐ ┌─────────────────┐
-    │ create_brain()  │ │create_chat│ │  config.py      │
-    │                 │ │  _llm()   │ │  (配置中心)      │
-    └────────┬────────┘ └─────┬─────┘ └────────┬────────┘
-             │                │                │
-             └────────────────┼────────────────┘
                               ▼
+                    ┌───────────────────┐
+                    │  private_brain.py │
+                    │  (核心处理引擎)    │
+                    └─────────┬─────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌───────────────┐   ┌───────────────┐   ┌───────────────┐
+│session_manager│   │coreference.py │   │privacy_filter │
+│   (v3.0)      │   │   (v3.0)      │   │   (v3.0)      │
+└───────┬───────┘   └───────┬───────┘   └───────┬───────┘
+        │                   │                   │
+        │                   └─────────┬─────────┘
+        │                             │
+        ▼                             ▼
+┌───────────────┐           ┌───────────────┐
+│consolidator.py│           │  Mem0 Memory  │
+│   (v3.0)      │           │  (集成层)      │
+└───────┬───────┘           └───────┬───────┘
+        │                           │
+        └───────────┬───────────────┘
+                    │
+                    ▼
     ┌─────────────────────────────────────────────────────────────┐
     │                    MEM0_CONFIG                              │
     │  ┌─────────────┐ ┌─────────────┐ ┌────────────┐ ┌────────┐ │
@@ -112,202 +118,140 @@ config.py
 
 ---
 
-## 认知引擎 (main.py) `[✅ 已实现]`
+## 核心处理引擎 (private_brain.py) `[✅ 已实现，v3.0]`
 
-**职责**: 实现核心认知流程
+**职责**: 实现核心记忆处理逻辑，采用 Y 型分流架构
 
-| 函数/类 | 职责 | 状态 |
+| 类/方法 | 职责 | 状态 |
 |---------|------|------|
-| `_background_consolidate()` | 后台执行记忆整合（异步） | ✅ |
-| `extract_user_identity()` | 从输入中提取用户身份信息 | ✅ |
-| `resolve_pronouns()` | 将代词"我"替换为用户名 | ✅ |
-| `normalize_relation_type()` | 归一化关系类型（英文→中文） | ✅ |
-| `dedupe_relations()` | 对图谱关系进行去重 | ✅ |
-| `IntentResult` | 意图判断结果模型 | ✅ |
-| `classify_intent()` | 通过 LLM 判断用户输入的意图类型 | ✅ |
-| `create_brain()` | 初始化 Mem0 Memory 实例 | ✅ |
-| `create_chat_llm()` | 创建对话用 LLM 实例 | ✅ |
-| `cognitive_process()` | 执行完整认知流程 | ✅ |
+| `PrivateBrain` | 核心处理类，封装记忆检索和存储 | ✅ v3.0 |
+| `process()` / `process_async()` | 处理用户输入（生产模式，v3.0 流程） | ✅ v3.0 |
+| `process_debug()` | 调试模式，返回自然语言报告 | ✅ |
+| `search()` | 仅检索，不存储 | ✅ |
+| `ask()` | 基于记忆回答问题（检索 + LLM 生成） | ✅ |
+| `add()` | 直接添加记忆（跳过隐私过滤） | ✅ |
+| `get_user_graph()` | 获取用户知识图谱 | ✅ |
+| `end_session()` / `end_session_async()` | 显式结束 Session（v3.0） | ✅ v3.0 |
+| `_retrieve()` | 内部检索方法（v3.0 格式） | ✅ v3.0 |
 
----
+### 检索流程
 
-### 异步记忆整合模块
-
-**职责**: 将记忆整合改为后台异步任务，用户无需等待
+**v3.0 流程**：
 
 ```python
-from concurrent.futures import ThreadPoolExecutor
-
-# 后台整合线程池（max_workers=2 确保不会积压太多任务）
-_consolidation_executor = ThreadPoolExecutor(
-    max_workers=2,
-    thread_name_prefix="mem_consolidate"
-)
-
-def _background_consolidate(brain: Memory, texts: list[str], user_id: str) -> None:
-    """后台执行记忆整合（异步，不阻塞主流程）"""
-    for text in texts:
-        try:
-            brain.add(text, user_id=user_id)
-        except Exception as e:
-            _consolidation_logger.warning(f"记忆保存失败: {e}")
-```
-
-**性能优化效果**: 用户感知延迟从 ~38s 降低到 ~10s
-
----
-
-### 代词消解模块
-
-**职责**: 自动提取用户身份并将代词"我"替换为用户名
-
-```python
-# 用户身份上下文（内存缓存）
-USER_IDENTITY_CACHE: dict[str, dict] = {}
-
-def extract_user_identity(user_input: str, user_id: str) -> str | None:
+async def process_async(self, input_text: str, user_id: str) -> dict:
     """
-    从输入中提取用户身份信息
+    v3.0 处理流程：
+    1. 获取或创建 Session
+    2. 获取最近事件进行指代消解
+    3. 使用消解后的查询检索长期记忆
+    4. 创建 Event 并添加到 Session
+    5. 返回 v3 格式（memories/relations/resolved_query）
+    """
+    # 1. Session 管理
+    await self.session_manager.get_or_create_session(user_id)
     
-    匹配模式: "我的名字叫XXX"、"我叫XXX"、"我是XXX" 等
-    """
-    patterns = [
-        r"我的名字叫(\S+)",
-        r"我叫(\S+)",
-        r"我是(\S+)",
-        r"我的名字是(\S+)",
-    ]
-    # ... 提取并缓存用户名
-
-def resolve_pronouns(user_input: str, user_id: str) -> str:
-    """
-    将代词"我"替换为用户名（如果已知）
+    # 2. 指代消解（检索时，规则匹配）
+    context_events = await self.session_manager.get_session_events(user_id, limit=5)
+    resolved_query = self.coreference_resolver.resolve_query(input_text, context_events)
     
-    示例: "我的儿子" → "小朱的儿子"
-    """
-    # 排除身份声明语句，避免 "我的名字叫小朱" → "小朱的名字叫小朱"
+    # 3. 检索长期记忆
+    result = self._retrieve(resolved_query, user_id)
+    result.resolved_query = resolved_query
+    
+    # 4. 添加事件到 Session
+    event = Event(role="user", content=input_text, ...)
+    await self.session_manager.add_event(user_id, event)
+    
+    return result.to_dict()  # v3 格式
 ```
+
+### Session 管理集成
+
+**v3.0 新增**：`PrivateBrain` 集成 Session 管理器，自动管理短期记忆：
+
+- 每次 `process()` 调用时自动获取或创建 Session
+- 将用户输入作为 Event 添加到 Session
+- Session 超时或显式结束时，触发整合流程
 
 ---
 
-### 图谱关系处理模块
+## Session 管理器 (session_manager.py) `[✅ 已实现，v3.0]`
 
-**职责**: 归一化和去重图谱关系
+**职责**: 管理用户 Session 生命周期，提供短期记忆存储
 
-```python
-# 关系类型映射（英文 → 中文）
-RELATION_NORMALIZE_MAP = {
-    "daughter": "女儿",
-    "son": "儿子",
-    "has": "有",
-    "has_name": "名字",
-    "brother": "弟弟",
-    "sister": "姐妹",
-    "father": "父亲",
-    "mother": "母亲",
-    # ...
-}
+| 类/方法 | 职责 | 状态 |
+|---------|------|------|
+| `SessionManager` | Session 生命周期管理器 | ✅ v3.0 |
+| `get_or_create_session()` | 获取或创建用户 Session | ✅ v3.0 |
+| `add_event()` | 向 Session 添加事件 | ✅ v3.0 |
+| `get_session_events()` | 获取最近事件（用于指代消解） | ✅ v3.0 |
+| `end_session()` | 结束 Session，触发整合 | ✅ v3.0 |
+| `_check_timeouts()` | 定期检查超时 Session | ✅ v3.0 |
 
-def normalize_relation_type(rel_type: str) -> str:
-    """归一化关系类型（英文 → 中文）"""
-    return RELATION_NORMALIZE_MAP.get(rel_type.lower(), rel_type)
-
-def dedupe_relations(relations: list) -> list:
-    """对图谱关系进行去重（基于 source|relationship|target 唯一键）"""
-```
+**关键特性**：
+- 内部自动管理，用户无感知
+- 支持超时自动结束（默认 30 分钟）
+- 支持最大事件数限制（默认 100 条）
+- 支持最大存活时间（默认 24 小时）
 
 ---
 
-### 意图判断模块
+## 指代消解器 (coreference.py) `[✅ 已实现，v3.0]`
 
-**职责**: 通过 LLM 判断用户输入的意图类型
+**职责**: 提供两种消解方式：检索时规则匹配，整合时 LLM 消解
 
-```python
-class IntentResult(BaseModel):
-    """意图判断结果"""
-    intent: Literal["personal", "factual", "general"]
-    reasoning: str
-    needs_external_search: bool
+| 类/方法 | 职责 | 状态 |
+|---------|------|------|
+| `CoreferenceResolver` | 指代消解器 | ✅ v3.0 |
+| `resolve_query()` | 检索时消解（规则匹配，快速） | ✅ v3.0 |
+| `resolve_events()` | 整合时消解（LLM，准确） | ✅ v3.0 |
 
-def classify_intent(user_input: str) -> IntentResult:
-    """
-    意图类型:
-    - personal: 个人信息/记忆查询（从本地记忆检索）
-    - factual:  需要外部事实知识（可能需要搜索）
-    - general:  通用对话/闲聊（直接对话）
-    """
-```
+**检索时消解**（规则匹配）：
+- 从最近事件中提取上下文
+- 规则匹配："这个/那个"→名词、"她/他"→人名、"它"→事物
+- 快速响应，不调用 LLM
 
----
-
-### LLM 工厂
-
-**职责**: 根据配置创建 LLM 实例
-
-```python
-def create_chat_llm():
-    """根据配置创建对话 LLM 实例"""
-    chat_config = get_chat_config()
-    
-    if chat_config["provider"] == "gemini":
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(...)
-    elif chat_config["provider"] == "openai":
-        from langchain_openai import ChatOpenAI
-        return ChatOpenAI(...)
-
-def create_brain() -> Memory:
-    """初始化混合记忆系统"""
-    return Memory.from_config(MEM0_CONFIG)
-```
+**整合时消解**（LLM）：
+- Session 结束时，使用 LLM 对事件进行语义分组和指代消解
+- 生成可独立理解的记忆片段
+- 支持跨轮次指代（如"这个"→"桔子"）
 
 ---
 
-### 核心认知流程
+## Session 整合器 (consolidator.py) `[✅ 已实现，v3.0]`
 
-```python
-def cognitive_process(brain, user_input, user_id):
-    # Step 0.5: 提取用户身份（如果有）
-    extract_user_identity(user_input, user_id)
-    
-    # Step 0.6: 代词消解（用于存储和检索）
-    resolved_input = resolve_pronouns(user_input, user_id)
-    
-    # Step 1: 意图判断
-    intent_result = classify_intent(resolved_input)
-    
-    # Step 2: 混合检索
-    search_results = brain.search(resolved_input, user_id=user_id)
-    
-    # Step 3: 处理结果（向量记忆 + 图谱关系归一化去重）
-    knowledge_context = format_results(search_results)
-    
-    # Step 4: 深度推理（包含用户身份上下文）
-    response = llm.invoke(system_prompt + knowledge_context, user_input)
-    
-    # Step 5: 异步记忆整合（不阻塞用户）
-    _consolidation_executor.submit(_background_consolidate, brain, texts, user_id)
-    
-    return answer  # 立即返回
-```
+**职责**: 将 Session 中的短期记忆整合为长期记忆
+
+| 类/方法 | 职责 | 状态 |
+|---------|------|------|
+| `SessionConsolidator` | Session 整合器 | ✅ v3.0 |
+| `consolidate()` | 整合 Session 到长期记忆 | ✅ v3.0 |
+
+**整合流程**：
+1. 跳过空 Session
+2. LLM 指代消解 + 语义分组（`coreference.resolve_events()`）
+3. 隐私过滤（`privacy_filter.classify()`）
+4. 存储 PRIVATE 数据到长期记忆（Qdrant + Neo4j）
+
+**性能**：后台异步执行，不阻塞用户
 
 ---
 
-## Python SDK (NeuroMemory 类) `[✅ 已实现]`
+## 隐私过滤器 (privacy_filter.py) `[✅ 已实现，v3.0]`
 
-**目标**: 封装底层函数，提供简洁易用的 API。底层委托 `PrivateBrain`（`get_brain()`）。
+**职责**: 使用 LLM 判断用户输入是否为私有数据
 
-```python
-from neuromemory import NeuroMemory
+| 类/方法 | 职责 | 状态 |
+|---------|------|------|
+| `PrivacyFilter` | LLM 驱动的隐私分类器 | ✅ v3.0 |
+| `classify()` | 判断文本是否为私有数据 | ✅ v3.0 |
 
-m = NeuroMemory()
-m.add("张三是李四的老板", user_id="test_user")   # 返回 memory_id
-m.search("张三管理什么", user_id="test_user", limit=5)  # 返回 dict: memories, relations, metadata
-m.ask("张三管理什么项目？", user_id="test_user")  # 返回 answer 字符串
-m.get_graph(user_id="test_user", depth=2)        # 返回 dict: status, nodes, edges, ...
-```
+**分类规则**：
+- **PRIVATE**：个人偏好、经历、私有实体关系、个人计划 → 存储
+- **PUBLIC**：通用知识、百科事实、公共信息、问句 → 不存储
 
-配套 **CLI**：`neuromemory status`、`add`、`search`、`ask`、`graph export`、`graph visualize`。安装：`uv pip install -e .` 或 `pip install -e .`。详见 [API.md](API.md)、[GETTING_STARTED.md](GETTING_STARTED.md)。
+**策略**：分类失败时默认按 PRIVATE 处理（宁可多存不漏存）
 
 ---
 
@@ -374,3 +318,4 @@ brain = Memory.from_config(MEM0_CONFIG)
 - [接口设计](API.md) - 完整 API 定义
 - [数据模型](DATA_MODEL.md) - 数据结构说明
 - [配置参考](CONFIGURATION.md) - 详细配置选项
+- [Session 记忆管理](SESSION_MEMORY_DESIGN.md) - v3.0 Session 管理设计文档

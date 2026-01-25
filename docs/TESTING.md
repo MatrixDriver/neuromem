@@ -374,4 +374,4 @@ result = brain.search("查询", user_id)
 - [快速开始](GETTING_STARTED.md) - 环境搭建和基础使用
 - [配置参考](CONFIGURATION.md) - 模型和数据库配置
 - [架构文档](ARCHITECTURE.md) - 系统整体架构
-- [v2 架构设计](ARCHITECTURE_V2.md) - Y 型分流架构详解
+- [主架构文档](ARCHITECTURE.md) - Y 型分流架构详解
