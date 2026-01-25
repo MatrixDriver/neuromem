@@ -8,9 +8,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 # 复制所有源代码和依赖文件
-COPY pyproject.toml uv.lock ./
-COPY neuromemory/ ./neuromemory/
-COPY config.py private_brain.py session_manager.py coreference.py consolidator.py privacy_filter.py health_checks.py http_server.py mcp_server.py main.py ./
+COPY . ./
 
 # 安装依赖（不包含 dev 依赖，减小镜像体积）
 RUN uv pip install --system --no-cache-dir -e .
@@ -30,8 +28,7 @@ COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 复制源代码
-COPY neuromemory/ ./neuromemory/
-COPY config.py private_brain.py session_manager.py coreference.py consolidator.py privacy_filter.py health_checks.py http_server.py mcp_server.py main.py ./
+COPY . ./
 
 # 创建非 root 用户（安全最佳实践）
 RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser && \
