@@ -55,10 +55,13 @@ services:
       cpu: 0.5
       memory: 1Gi
 
-    # 自动扩展配置
+    # 扩展配置
+    # 重要：当前 Session 存储在内存中，不支持多实例共享。
+    # 若配置 max > 1，会导致 Session 跨实例丢失（/end-session 返回 "No active session"）。
+    # 多实例支持需先实现 Redis Session 存储，参见 docs/ARCHITECTURE.md。
     scaling:
       min: 1
-      max: 3
+      max: 1
       targetCPUUtilization: 70
 
 # =============================================================================
