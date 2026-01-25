@@ -114,10 +114,15 @@ SILICONFLOW_API_KEY=your-siliconflow-api-key
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/process` | POST | 处理记忆（生产模式，返回 JSON） |
+| `/` | GET | 存活探测 |
+| `/process` | POST | 核心接口：处理记忆（生产模式） |
 | `/debug` | POST | 处理记忆（调试模式，返回自然语言报告） |
 | `/graph/{user_id}` | GET | 获取用户知识图谱 |
+| `/end-session` | POST | 结束会话（触发记忆持久化） |
+| `/session-status/{user_id}` | GET | 获取会话状态 |
 | `/health` | GET | 健康检查 |
+| `/search` | GET | 纯检索（不写 Session） |
+| `/ask` | POST | 基于记忆问答（LLM 生成） |
 
 ## 测试
 

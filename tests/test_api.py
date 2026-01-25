@@ -1,9 +1,10 @@
 """
-/api/v1 与 health_checks 测试
+API 端点与 health_checks 测试
 
 - health_checks: check_neo4j, check_qdrant, check_llm_config
-- /api/v1/memory, /api/v1/memory/search, /api/v1/graph, /api/v1/health
-- /api/v1/ask 标 @pytest.mark.slow（需 LLM）
+- /health 健康检查（含 components）
+- /search 纯检索
+- /ask 基于记忆问答（标 @pytest.mark.slow，需 LLM）
 """
 import pytest
 
@@ -37,7 +38,7 @@ class TestHealthChecks:
 
 
 # =============================================================================
-# /api/v1 端点集成测试（TestClient）
+# API 端点集成测试（TestClient）
 # =============================================================================
 
 
@@ -46,11 +47,11 @@ def client():
     return TestClient(app)
 
 
-class TestApiV1Health:
-    """GET /api/v1/health：不依赖 DB 可测"""
+class TestHealth:
+    """GET /health：不依赖 DB 可测"""
 
     def test_health_returns_status_and_components(self, client):
-        r = client.get("/api/v1/health")
+        r = client.get("/health")
         assert r.status_code == 200
         data = r.json()
         assert "status" in data
@@ -63,11 +64,11 @@ class TestApiV1Health:
         assert data["service"] == "neuro-memory"
 
 
-class TestApiV1MemorySearch:
-    """GET /api/v1/memory/search：无 DB 时返回空 memories 亦可"""
+class TestSearch:
+    """GET /search：纯检索，无 DB 时返回空 memories 亦可"""
 
-    def test_memory_search_returns_200_and_structure(self, client):
-        r = client.get("/api/v1/memory/search", params={"query": "test", "user_id": "u", "limit": 2})
+    def test_search_returns_200_and_structure(self, client):
+        r = client.get("/search", params={"query": "test", "user_id": "u", "limit": 2})
         assert r.status_code == 200
         data = r.json()
         assert "memories" in data
@@ -76,38 +77,12 @@ class TestApiV1MemorySearch:
         assert len(data["memories"]) <= 2
 
 
-class TestApiV1Graph:
-    """GET /api/v1/graph：返回含 nodes、edges"""
-
-    def test_graph_returns_nodes_and_edges(self, client):
-        r = client.get("/api/v1/graph", params={"user_id": "u", "depth": 2})
-        assert r.status_code == 200
-        data = r.json()
-        assert "nodes" in data
-        assert "edges" in data
-        assert isinstance(data["nodes"], list)
-        assert isinstance(data["edges"], list)
-
-
-class TestApiV1MemoryPost:
-    """POST /api/v1/memory：可能 200（DB 可用）或 500（DB 不可用）"""
-
-    def test_memory_post_structure_or_error(self, client):
-        r = client.post("/api/v1/memory", json={"content": "test memory", "user_id": "u"})
-        # 200: 返回 memory_id；500: DB/ mem0 异常
-        assert r.status_code in (200, 500)
-        if r.status_code == 200:
-            data = r.json()
-            assert "memory_id" in data
-            assert isinstance(data["memory_id"], str)
-
-
 @pytest.mark.slow
-class TestApiV1Ask:
-    """POST /api/v1/ask：需 LLM，标 slow"""
+class TestAsk:
+    """POST /ask：需 LLM，标 slow"""
 
     def test_ask_returns_answer_and_sources_or_error(self, client):
-        r = client.post("/api/v1/ask", json={"question": "测试问题", "user_id": "u"})
+        r = client.post("/ask", json={"question": "测试问题", "user_id": "u"})
         assert r.status_code in (200, 500)
         if r.status_code == 200:
             data = r.json()

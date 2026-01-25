@@ -16,7 +16,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -95,12 +95,6 @@ class DebugResponse(BaseModel):
     report: str
 
 
-class HealthResponse(BaseModel):
-    """健康检查响应"""
-    status: str
-    service: str
-
-
 class EndSessionRequest(BaseModel):
     """结束会话请求"""
     user_id: str
@@ -111,19 +105,6 @@ class EndSessionResponse(BaseModel):
     status: str
     message: str
     session_info: dict | None = None
-
-
-# ---------- /api/v1 请求/响应模型 ----------
-class AddMemoryRequest(BaseModel):
-    """添加记忆请求"""
-    content: str
-    user_id: str = "default"
-    metadata: dict | None = None
-
-
-class AddMemoryResponse(BaseModel):
-    """添加记忆响应"""
-    memory_id: str
 
 
 class AskRequest(BaseModel):
@@ -304,71 +285,14 @@ async def get_session_status(user_id: str) -> dict:
 
 
 @app.get("/health", summary="健康检查")
-async def health_check() -> HealthResponse:
+async def health_check() -> HealthV1Response:
     """
-    健康检查端点。
-    
-    用于负载均衡器、容器编排等场景的健康探测。
-    仅表示进程就绪；依赖（Neo4j、Qdrant、LLM）状态请用 GET /api/v1/health。
+    健康检查 - 检查所有关键服务状态。
+
+    返回：
+    - status: healthy（所有必需服务可用）或 unhealthy
+    - components: {neo4j, qdrant, llm} 各组件状态
     """
-    return HealthResponse(status="healthy", service="neuro-memory")
-
-
-# =============================================================================
-# /api/v1 路由（与根路径并存）
-# =============================================================================
-
-router = APIRouter(prefix="/api/v1", tags=["v1"])
-
-
-@router.post("/memory", summary="添加记忆")
-async def api_v1_add_memory(request: AddMemoryRequest) -> AddMemoryResponse:
-    """添加记忆（跳过隐私过滤），返回 memory_id。"""
-    logger.info(f"[/api/v1/memory] user_id={request.user_id}, content_len={len(request.content)}")
-    brain = get_brain()
-    result = brain.add(request.content, request.user_id)
-    if result.get("status") == "error":
-        raise HTTPException(status_code=500, detail=result.get("error", "添加失败"))
-    return AddMemoryResponse(memory_id=result["memory_id"])
-
-
-@router.get("/memory/search", summary="混合检索")
-async def api_v1_memory_search(
-    query: str = Query(..., description="查询文本"),
-    user_id: str = Query("default", description="用户标识"),
-    limit: int = Query(10, description="返回数量上限"),
-) -> dict:
-    """混合检索，返回 memories、relations、metadata。"""
-    logger.info(f"[/api/v1/memory/search] user_id={user_id}, query_len={len(query)}, limit={limit}")
-    brain = get_brain()
-    return brain.search(query, user_id=user_id, limit=limit)
-
-
-@router.post("/ask", summary="基于记忆回答问题")
-async def api_v1_ask(request: AskRequest) -> AskResponse:
-    """基于记忆检索 + LLM 生成回答，返回 answer、sources。"""
-    logger.info(f"[/api/v1/ask] user_id={request.user_id}, question_len={len(request.question)}")
-    brain = get_brain()
-    result = brain.ask(request.question, request.user_id)
-    if result.get("error"):
-        raise HTTPException(status_code=500, detail=result.get("error", "问答失败"))
-    return AskResponse(answer=result["answer"], sources=result["sources"])
-
-
-@router.get("/graph", summary="获取知识图谱")
-async def api_v1_graph(
-    user_id: str = Query("default", description="用户标识"),
-    depth: int = Query(2, description="预留遍历深度"),
-) -> dict:
-    """获取用户知识图谱，含 nodes、edges、memories、graph_relations。"""
-    logger.info(f"[/api/v1/graph] user_id={user_id}, depth={depth}")
-    brain = get_brain()
-    return brain.get_user_graph(user_id, depth=depth)
-
-
-@router.get("/health", summary="健康检查（含 components）")
-async def api_v1_health() -> HealthV1Response:
-    """健康检查，返回 status 及 components: {neo4j, qdrant, llm}。"""
     neo4j_ok = check_neo4j()
     qdrant_ok = check_qdrant()
     llm_ok = check_llm_config()
@@ -380,7 +304,35 @@ async def api_v1_health() -> HealthV1Response:
     )
 
 
-app.include_router(router)
+@app.get("/search", summary="纯检索", tags=["检索"])
+async def search_memories(
+    query: str = Query(..., description="查询文本"),
+    user_id: str = Query("default", description="用户标识"),
+    limit: int = Query(10, description="返回数量上限"),
+) -> dict:
+    """
+    纯检索：混合检索相关记忆，不写 Session。
+
+    返回 memories、relations、metadata，适用于只读查询场景。
+    """
+    logger.info(f"[/search] user_id={user_id}, query_len={len(query)}, limit={limit}")
+    brain = get_brain()
+    return brain.search(query, user_id=user_id, limit=limit)
+
+
+@app.post("/ask", summary="基于记忆问答", tags=["问答"])
+async def ask_with_memory(request: AskRequest) -> AskResponse:
+    """
+    基于记忆检索 + LLM 生成回答。
+
+    返回 answer（LLM 生成的答案）和 sources（参考的记忆来源）。
+    """
+    logger.info(f"[/ask] user_id={request.user_id}, question_len={len(request.question)}")
+    brain = get_brain()
+    result = brain.ask(request.question, request.user_id)
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result.get("error", "问答失败"))
+    return AskResponse(answer=result["answer"], sources=result["sources"])
 
 
 # =============================================================================

@@ -5,7 +5,7 @@
 > **版本**: v3.0  
 > **最后更新**: 2026-01-24
 >
-> **注意**：本文档面向普通客户和集成开发者。如需高级接口（如 `/api/v1/*`），请参考 [开发者接口文档](DEVELOPER_API.md)。
+> **注意**：本文档涵盖所有 REST API 端点。
 
 ---
 
@@ -20,6 +20,8 @@
   - [结束会话](#4-结束会话)
   - [获取会话状态](#5-获取会话状态)
   - [健康检查](#6-健康检查)
+  - [纯检索](#7-纯检索)
+  - [基于记忆问答](#8-基于记忆问答)
 - [响应格式](#响应格式)
 - [错误处理](#错误处理)
 - [使用示例](#使用示例)
@@ -472,9 +474,180 @@ GET /health
 ```json
 {
     "status": "healthy",
-    "service": "neuro-memory"
+    "service": "neuro-memory",
+    "components": {
+        "neo4j": true,
+        "qdrant": true,
+        "llm": true
+    }
 }
 ```
+
+#### 响应字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `status` | string | 整体状态：`healthy` 或 `unhealthy` |
+| `service` | string | 服务名称 |
+| `components.neo4j` | boolean | Neo4j 连接状态 |
+| `components.qdrant` | boolean | Qdrant 连接状态 |
+| `components.llm` | boolean | LLM 配置状态 |
+
+---
+
+### 7. 纯检索
+
+仅执行检索操作，不进行存储，也不写 Session。返回语义检索和知识图谱检索的结果。
+
+适用于只读查询场景，如搜索功能、数据分析。
+
+#### 请求
+
+```
+GET /search
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `query` | string | ✅ | 查询文本 |
+| `user_id` | string | ⚠️ | 用户标识（默认: "default"） |
+| `limit` | integer | ❌ | 返回数量上限（默认: 10） |
+
+#### 请求示例
+
+**Bash / Git Bash：**
+```bash
+# 本地
+curl "http://localhost:8765/search?query=张三管理什么&user_id=test_user&limit=5"
+
+# 远程
+curl "https://neuromemory.zeabur.app/search?query=张三管理什么&user_id=test_user&limit=5"
+```
+
+**PowerShell 7：**
+```powershell
+# 本地
+Invoke-RestMethod -Uri "http://localhost:8765/search?query=张三管理什么&user_id=test_user&limit=5" -Method Get
+
+# 远程
+Invoke-RestMethod -Uri "https://neuromemory.zeabur.app/search?query=张三管理什么&user_id=test_user&limit=5" -Method Get
+```
+
+#### 响应示例
+
+```json
+{
+    "memories": [
+        {
+            "content": "张三是技术部门的负责人",
+            "score": 0.89
+        },
+        {
+            "content": "张三负责管理李四和王五",
+            "score": 0.85
+        }
+    ],
+    "relations": [
+        {
+            "source": "张三",
+            "relation": "管理",
+            "target": "李四"
+        }
+    ],
+    "metadata": {
+        "retrieval_time_ms": 45,
+        "has_memory": true
+    }
+}
+```
+
+#### 响应字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `memories` | array | 语义检索匹配的记忆片段 |
+| `memories[].content` | string | 记忆内容 |
+| `memories[].score` | number | 相似度分数 (0-1) |
+| `relations` | array | 知识图谱中的关系三元组 |
+| `metadata.retrieval_time_ms` | number | 检索耗时（毫秒） |
+| `metadata.has_memory` | boolean | 是否检索到相关记忆 |
+
+---
+
+### 8. 基于记忆问答
+
+基于记忆检索 + LLM 生成完整回答。与 `/process` 接口的区别是，此接口会调用 LLM 生成完整的自然语言回答。
+
+#### 请求
+
+```
+POST /ask
+Content-Type: application/json
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `question` | string | ✅ | 用户问题 |
+| `user_id` | string | ⚠️ | 用户标识（默认: "default"） |
+
+#### 请求示例
+
+**Bash / Git Bash：**
+```bash
+# 本地
+curl -X POST http://localhost:8765/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "张三管理什么项目？", "user_id": "test_user"}'
+
+# 远程
+curl -X POST https://neuromemory.zeabur.app/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "张三管理什么项目？", "user_id": "test_user"}'
+```
+
+**PowerShell 7：**
+```powershell
+# 本地
+$body = @{
+    question = "张三管理什么项目？"
+    user_id = "test_user"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:8765/ask" -Method Post -ContentType "application/json" -Body $body
+
+# 远程
+$body = @{
+    question = "张三管理什么项目？"
+    user_id = "test_user"
+} | ConvertTo-Json
+Invoke-RestMethod -Uri "https://neuromemory.zeabur.app/ask" -Method Post -ContentType "application/json" -Body $body
+```
+
+#### 响应示例
+
+```json
+{
+    "answer": "根据记忆，张三负责管理技术部门，具体管理李四和王五等团队成员。",
+    "sources": [
+        {
+            "content": "张三是技术部门的负责人",
+            "score": 0.89
+        }
+    ]
+}
+```
+
+#### 响应字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `answer` | string | LLM 生成的完整回答 |
+| `sources` | array | 用于生成回答的记忆来源 |
+
+#### 注意事项
+
+- ⚠️ **需要 LLM 调用**：此接口会调用 LLM 生成回答，需要配置 LLM（DeepSeek/Gemini）
+- ⚠️ **响应时间较长**：由于需要 LLM 生成，响应时间比 `/process` 接口更长
+- ✅ **适用场景**：需要完整自然语言回答的场景，如问答系统、对话机器人
 
 ---
 
@@ -889,7 +1062,6 @@ NeuroMemory 可以作为 DIFY 工作流的外部 HTTP 节点使用，为对话�
 - [快速开始](GETTING_STARTED.md) - 环境配置和启动
 - [测试指南](TESTING.md) - 测试用例和方法
 - [接口总览](API.md) - 查看所有接口类型（REST API、CLI）
-- [开发者接口文档](DEVELOPER_API.md) - 高级接口（`/api/v1/*`）文档
 
 ---
 

@@ -256,22 +256,15 @@ class TestZeaburRestApi:
         assert "version" in data
         assert "docs" in data
     
-    def test_health_endpoint(self, http_client):
-        """测试 GET /health 基础健康检查"""
+    def test_health_endpoint_detailed(self, http_client):
+        """测试 GET /health 详细健康检查（含 components）"""
         response = http_client.get("/health")
         assert response.status_code == 200
         data = response.json() if hasattr(response, 'json') else response
         assert "status" in data
-        assert data["status"] == "healthy"
-        assert "service" in data
-    
-    def test_api_v1_health_endpoint(self, http_client):
-        """测试 GET /api/v1/health 详细健康检查"""
-        response = http_client.get("/api/v1/health")
-        assert response.status_code == 200
-        data = response.json() if hasattr(response, 'json') else response
-        assert "status" in data
         assert data["status"] in ("healthy", "unhealthy")
+        assert "service" in data
+        assert data["service"] == "neuro-memory"
         assert "components" in data
         assert "neo4j" in data["components"]
         assert "qdrant" in data["components"]
@@ -294,31 +287,15 @@ class TestZeaburRestApi:
         assert isinstance(data["memories"], list)
         assert isinstance(data["relations"], list)
     
-    def test_api_v1_memory_post(self, http_client, unique_user_id):
-        """测试 POST /api/v1/memory 添加记忆"""
-        payload = {
-            "content": "这是一条测试记忆",
-            "user_id": unique_user_id,
-            "metadata": {"test": True}
-        }
-        
-        response = http_client.post("/api/v1/memory", json=payload)
-        # 可能成功（200）或失败（500），但结构应该正确
-        assert response.status_code in (200, 500)
-        if response.status_code == 200:
-            data = response.json() if hasattr(response, 'json') else response
-            assert "memory_id" in data
-            assert isinstance(data["memory_id"], str)
-    
-    def test_api_v1_memory_search(self, http_client, unique_user_id):
-        """测试 GET /api/v1/memory/search 混合检索"""
+    def test_search(self, http_client, unique_user_id):
+        """测试 GET /search 纯检索"""
         params = {
             "query": "测试查询",
             "user_id": unique_user_id,
             "limit": 5
         }
-        
-        response = http_client.get("/api/v1/memory/search", params=params)
+
+        response = http_client.get("/search", params=params)
         # 可能成功（200）或失败（500，如数据库连接问题）
         assert response.status_code in (200, 500)
         if response.status_code == 200:
@@ -326,33 +303,16 @@ class TestZeaburRestApi:
             assert "memories" in data
             assert "metadata" in data
             assert isinstance(data["memories"], list)
-    
-    def test_api_v1_graph(self, http_client, unique_user_id):
-        """测试 GET /api/v1/graph 获取知识图谱"""
-        params = {
-            "user_id": unique_user_id,
-            "depth": 2
-        }
-        
-        response = http_client.get("/api/v1/graph", params=params)
-        # 可能成功（200）或失败（500，如数据库连接问题）
-        assert response.status_code in (200, 500)
-        if response.status_code == 200:
-            data = response.json() if hasattr(response, 'json') else response
-            assert "nodes" in data
-            assert "edges" in data
-            assert isinstance(data["nodes"], list)
-            assert isinstance(data["edges"], list)
-    
+
     @pytest.mark.slow
-    def test_api_v1_ask(self, http_client, unique_user_id):
-        """测试 POST /api/v1/ask 基于记忆问答（需要 LLM）"""
+    def test_ask(self, http_client, unique_user_id):
+        """测试 POST /ask 基于记忆问答（需要 LLM）"""
         payload = {
             "question": "测试问题：你是谁？",
             "user_id": unique_user_id
         }
-        
-        response = http_client.post("/api/v1/ask", json=payload)
+
+        response = http_client.post("/ask", json=payload)
         # 可能成功（200）或失败（500）
         assert response.status_code in (200, 500)
         if response.status_code == 200:
@@ -392,38 +352,35 @@ class TestZeaburE2E:
     @pytest.mark.slow
     def test_full_memory_workflow(self, http_client, unique_user_id):
         """测试完整的记忆添加和检索流程"""
-        # 1. 添加记忆
+        # 1. 通过 /process 添加记忆
         payload_add = {
-            "content": f"用户 {unique_user_id} 喜欢编程和人工智能",
+            "input": f"用户 {unique_user_id} 喜欢编程和人工智能",
             "user_id": unique_user_id
         }
-        
-        response_add = http_client.post("/api/v1/memory", json=payload_add)
-        if response_add.status_code != 200:
-            pytest.skip(f"无法添加记忆（可能数据库未就绪）: {response_add.status_code}")
-        
-        # 等待索引更新
-        time.sleep(2)
-        
+
+        response_add = http_client.post("/process", json=payload_add)
+        assert response_add.status_code == 200
+
+        # 结束会话以触发记忆整合
+        http_client.post("/end-session", json={"user_id": unique_user_id})
+
+        # 等待整合完成
+        time.sleep(3)
+
         # 2. 检索记忆
         params_search = {
             "query": "编程",
             "user_id": unique_user_id,
             "limit": 5
         }
-        
-        response_search = http_client.get("/api/v1/memory/search", params=params_search)
+
+        response_search = http_client.get("/search", params=params_search)
         assert response_search.status_code == 200
         data_search = response_search.json() if hasattr(response_search, 'json') else response_search
         assert "memories" in data_search
-        
+
         # 3. 获取图谱
-        params_graph = {
-            "user_id": unique_user_id,
-            "depth": 2
-        }
-        
-        response_graph = http_client.get("/api/v1/graph", params=params_graph)
+        response_graph = http_client.get(f"/graph/{unique_user_id}")
         assert response_graph.status_code == 200
         data_graph = response_graph.json() if hasattr(response_graph, 'json') else response_graph
         assert "nodes" in data_graph
