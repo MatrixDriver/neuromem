@@ -70,7 +70,7 @@ services:
   - name: neo4j-neuromemory
     type: prebuilt
     prebuiltType: neo4j
-    version: "5.26"
+    version: "5.26.0"
 
     env:
       # 认证配置
