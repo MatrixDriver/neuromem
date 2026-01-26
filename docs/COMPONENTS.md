@@ -2,7 +2,6 @@
 
 > 返回 [主架构文档](ARCHITECTURE.md)
 >
-> **版本**: v3.0
 > **最后更新**: 2026-01-24
 
 ---
@@ -26,7 +25,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         组件依赖图 (v3.0)                        │
+│                         组件依赖图                              │
 └─────────────────────────────────────────────────────────────────┘
 
                     ┌───────────────────┐
@@ -47,7 +46,6 @@
         ▼                     ▼                     ▼
 ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
 │session_manager│   │coreference.py │   │privacy_filter │
-│   (v3.0)      │   │   (v3.0)      │   │   (v3.0)      │
 └───────┬───────┘   └───────┬───────┘   └───────┬───────┘
         │                   │                   │
         │                   └─────────┬─────────┘
@@ -55,7 +53,7 @@
         ▼                             ▼
 ┌───────────────┐           ┌───────────────┐
 │consolidator.py│           │  Mem0 Memory  │
-│   (v3.0)      │           │  (集成层)      │
+│               │           │  (集成层)      │
 └───────┬───────┘           └───────┬───────┘
         │                           │
         └───────────┬───────────────┘
@@ -118,35 +116,35 @@ config.py
 
 ---
 
-## 核心处理引擎 (private_brain.py) `[✅ 已实现，v3.0]`
+## 核心处理引擎 (private_brain.py) `[✅ 已实现]`
 
 **职责**: 实现核心记忆处理逻辑，采用 Y 型分流架构
 
 | 类/方法 | 职责 | 状态 |
 |---------|------|------|
-| `PrivateBrain` | 核心处理类，封装记忆检索和存储 | ✅ v3.0 |
-| `process()` / `process_async()` | 处理用户输入（生产模式，v3.0 流程） | ✅ v3.0 |
+| `PrivateBrain` | 核心处理类，封装记忆检索和存储 | ✅ |
+| `process()` / `process_async()` | 处理用户输入（生产模式） | ✅ |
 | `process_debug()` | 调试模式，返回自然语言报告 | ✅ |
 | `search()` | 仅检索，不存储 | ✅ |
 | `ask()` | 基于记忆回答问题（检索 + LLM 生成） | ✅ |
 | `add()` | 直接添加记忆（跳过隐私过滤） | ✅ |
 | `get_user_graph()` | 获取用户知识图谱 | ✅ |
-| `end_session()` / `end_session_async()` | 显式结束 Session（v3.0） | ✅ v3.0 |
-| `_retrieve()` | 内部检索方法（v3.0 格式） | ✅ v3.0 |
+| `end_session()` / `end_session_async()` | 显式结束 Session | ✅ |
+| `_retrieve()` | 内部检索方法 | ✅ |
 
 ### 检索流程
 
-**v3.0 流程**：
+**处理流程**：
 
 ```python
 async def process_async(self, input_text: str, user_id: str) -> dict:
     """
-    v3.0 处理流程：
+    处理流程：
     1. 获取或创建 Session
     2. 获取最近事件进行指代消解
     3. 使用消解后的查询检索长期记忆
     4. 创建 Event 并添加到 Session
-    5. 返回 v3 格式（memories/relations/resolved_query）
+    5. 返回格式（memories/relations/resolved_query）
     """
     # 1. Session 管理
     await self.session_manager.get_or_create_session(user_id)
@@ -163,12 +161,12 @@ async def process_async(self, input_text: str, user_id: str) -> dict:
     event = Event(role="user", content=input_text, ...)
     await self.session_manager.add_event(user_id, event)
     
-    return result.to_dict()  # v3 格式
+    return result.to_dict()
 ```
 
 ### Session 管理集成
 
-**v3.0 新增**：`PrivateBrain` 集成 Session 管理器，自动管理短期记忆：
+**Session 管理**：`PrivateBrain` 集成 Session 管理器，自动管理短期记忆：
 
 - 每次 `process()` 调用时自动获取或创建 Session
 - 将用户输入作为 Event 添加到 Session
@@ -176,18 +174,18 @@ async def process_async(self, input_text: str, user_id: str) -> dict:
 
 ---
 
-## Session 管理器 (session_manager.py) `[✅ 已实现，v3.0]`
+## Session 管理器 (session_manager.py) `[✅ 已实现]`
 
 **职责**: 管理用户 Session 生命周期，提供短期记忆存储
 
 | 类/方法 | 职责 | 状态 |
 |---------|------|------|
-| `SessionManager` | Session 生命周期管理器 | ✅ v3.0 |
-| `get_or_create_session()` | 获取或创建用户 Session | ✅ v3.0 |
-| `add_event()` | 向 Session 添加事件 | ✅ v3.0 |
-| `get_session_events()` | 获取最近事件（用于指代消解） | ✅ v3.0 |
-| `end_session()` | 结束 Session，触发整合 | ✅ v3.0 |
-| `_check_timeouts()` | 定期检查超时 Session | ✅ v3.0 |
+| `SessionManager` | Session 生命周期管理器 | ✅ |
+| `get_or_create_session()` | 获取或创建用户 Session | ✅ |
+| `add_event()` | 向 Session 添加事件 | ✅ |
+| `get_session_events()` | 获取最近事件（用于指代消解） | ✅ |
+| `end_session()` | 结束 Session，触发整合 | ✅ |
+| `_check_timeouts()` | 定期检查超时 Session | ✅ |
 
 **关键特性**：
 - 内部自动管理，用户无感知
@@ -197,15 +195,15 @@ async def process_async(self, input_text: str, user_id: str) -> dict:
 
 ---
 
-## 指代消解器 (coreference.py) `[✅ 已实现，v3.0]`
+## 指代消解器 (coreference.py) `[✅ 已实现]`
 
 **职责**: 提供两种消解方式：检索时规则匹配，整合时 LLM 消解
 
 | 类/方法 | 职责 | 状态 |
 |---------|------|------|
-| `CoreferenceResolver` | 指代消解器 | ✅ v3.0 |
-| `resolve_query()` | 检索时消解（规则匹配，快速） | ✅ v3.0 |
-| `resolve_events()` | 整合时消解（LLM，准确） | ✅ v3.0 |
+| `CoreferenceResolver` | 指代消解器 | ✅ |
+| `resolve_query()` | 检索时消解（规则匹配，快速） | ✅ |
+| `resolve_events()` | 整合时消解（LLM，准确） | ✅ |
 
 **检索时消解**（规则匹配）：
 - 从最近事件中提取上下文
@@ -219,14 +217,14 @@ async def process_async(self, input_text: str, user_id: str) -> dict:
 
 ---
 
-## Session 整合器 (consolidator.py) `[✅ 已实现，v3.0]`
+## Session 整合器 (consolidator.py) `[✅ 已实现]`
 
 **职责**: 将 Session 中的短期记忆整合为长期记忆
 
 | 类/方法 | 职责 | 状态 |
 |---------|------|------|
-| `SessionConsolidator` | Session 整合器 | ✅ v3.0 |
-| `consolidate()` | 整合 Session 到长期记忆 | ✅ v3.0 |
+| `SessionConsolidator` | Session 整合器 | ✅ |
+| `consolidate()` | 整合 Session 到长期记忆 | ✅ |
 
 **整合流程**：
 1. 跳过空 Session
@@ -238,14 +236,14 @@ async def process_async(self, input_text: str, user_id: str) -> dict:
 
 ---
 
-## 隐私过滤器 (privacy_filter.py) `[✅ 已实现，v3.0]`
+## 隐私过滤器 (privacy_filter.py) `[✅ 已实现]`
 
 **职责**: 使用 LLM 判断用户输入是否为私有数据
 
 | 类/方法 | 职责 | 状态 |
 |---------|------|------|
-| `PrivacyFilter` | LLM 驱动的隐私分类器 | ✅ v3.0 |
-| `classify()` | 判断文本是否为私有数据 | ✅ v3.0 |
+| `PrivacyFilter` | LLM 驱动的隐私分类器 | ✅ |
+| `classify()` | 判断文本是否为私有数据 | ✅ |
 
 **分类规则**：
 - **PRIVATE**：个人偏好、经历、私有实体关系、个人计划 → 存储
@@ -284,9 +282,9 @@ MEM0_CONFIG = {
     "graph_store": {  # 可通过 ENABLE_GRAPH_STORE 开关禁用
         "provider": "neo4j",
         "config": {
-            "url": "neo4j://localhost:17687",
+            "url": "bolt://localhost:17687",  # 单实例使用 bolt://，集群使用 neo4j://
             "username": "neo4j",
-            "password": "password123",
+            "password": "zeabur2025",
         }
     },
     "llm": {
@@ -318,4 +316,4 @@ brain = Memory.from_config(MEM0_CONFIG)
 - [接口设计](API.md) - 完整 API 定义
 - [数据模型](DATA_MODEL.md) - 数据结构说明
 - [配置参考](CONFIGURATION.md) - 详细配置选项
-- [Session 记忆管理](SESSION_MEMORY_DESIGN.md) - v3.0 Session 管理设计文档
+- [Session 记忆管理](SESSION_MEMORY_DESIGN.md) - Session 管理设计文档

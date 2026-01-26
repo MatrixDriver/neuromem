@@ -8,19 +8,21 @@ ZeaBur 远程部署连接和服务接口测试
 - 端到端功能
 
 运行方式:
+    # 现在直接从 config.py 读取配置，无需设置环境变量
     # Bash / Linux / macOS:
-    ZEABUR_BASE_URL=https://neuromemory.zeabur.app pytest tests/test_zeabur.py -v
+    pytest tests/test_zeabur.py -v
     
     # PowerShell (Windows):
-    $env:ZEABUR_BASE_URL="https://neuromemory.zeabur.app"; uv run pytest tests/test_zeabur.py -v
-    # 或使用 uv 的 --env 参数（如果支持）:
-    # uv run --env ZEABUR_BASE_URL=https://neuromemory.zeabur.app pytest tests/test_zeabur.py -v
+    uv run pytest tests/test_zeabur.py -v
     
-    # 跳过慢速测试 (PowerShell):
-    $env:ZEABUR_BASE_URL="https://neuromemory.zeabur.app"; uv run pytest tests/test_zeabur.py -v -m "not slow"
+    # 跳过慢速测试:
+    uv run pytest tests/test_zeabur.py -v -m "not slow"
     
     # 只运行配置测试（不需要远程服务）
     pytest tests/test_zeabur.py::TestZeaburConfig -v
+    
+    # 如果需要临时覆盖配置，仍可使用环境变量:
+    # $env:ZEABUR_BASE_URL="https://custom-url.zeabur.app"; uv run pytest tests/test_zeabur.py -v
 """
 import os
 import time
@@ -44,15 +46,15 @@ except ImportError:
 # 配置和常量
 # =============================================================================
 
-# ZeaBur 远程服务 URL（通过环境变量配置）
-ZEABUR_BASE_URL = os.getenv("ZEABUR_BASE_URL", "https://neuromemory.zeabur.app").rstrip("/")
-ZEABUR_NEO4J_URL = os.getenv("ZEABUR_NEO4J_URL")  # 可选，如 neo4j://neo4j-neuromemory:7687
-ZEABUR_NEO4J_PASSWORD = os.getenv("ZEABUR_NEO4J_PASSWORD", os.getenv("Neo4jPassword", "zeabur2025"))
-ZEABUR_QDRANT_HOST = os.getenv("ZEABUR_QDRANT_HOST")  # 可选，如 qdrant-neuromemory
-ZEABUR_QDRANT_PORT = int(os.getenv("ZEABUR_QDRANT_PORT", "6400"))
+# 从 config.py 导入 ZeaBur 测试配置
+from config import ZEABUR_TEST_CONFIG
 
-# HTTP 请求超时（秒）
-HTTP_TIMEOUT = 30
+ZEABUR_BASE_URL = ZEABUR_TEST_CONFIG["base_url"]
+ZEABUR_NEO4J_URL = ZEABUR_TEST_CONFIG["neo4j_url"]
+ZEABUR_NEO4J_PASSWORD = ZEABUR_TEST_CONFIG["neo4j_password"]
+ZEABUR_QDRANT_HOST = ZEABUR_TEST_CONFIG["qdrant_host"]
+ZEABUR_QDRANT_PORT = ZEABUR_TEST_CONFIG["qdrant_port"]
+HTTP_TIMEOUT = ZEABUR_TEST_CONFIG["http_timeout"]
 
 # 测试标记：所有 ZeaBur 测试都需要此标记
 pytestmark = pytest.mark.zeabur
@@ -110,10 +112,14 @@ def unique_user_id() -> str:
 
 @pytest.fixture
 def skip_if_no_zeabur_url():
-    """如果未配置 ZeaBur URL，跳过测试"""
-    if not ZEABUR_BASE_URL or ZEABUR_BASE_URL == "https://neuromemory.zeabur.app":
-        # 如果使用默认值，检查是否真的可访问
-        pass  # 允许使用默认值，但会在实际请求时失败
+    """
+    如果未配置 ZeaBur URL，跳过测试
+    
+    注意：现在配置从 config.py 读取，默认值为 https://neuromemory.zeabur.app
+    如果需要临时覆盖，可通过环境变量 ZEABUR_BASE_URL 设置
+    """
+    # 配置已在 config.py 中设置，这里保留 fixture 以保持向后兼容
+    # 实际测试会在请求时失败，而不是在这里跳过
     return None
 
 
@@ -206,7 +212,8 @@ class TestZeaburDatabaseConnections:
         try:
             from neo4j import GraphDatabase
             
-            # 解析 URL（格式：neo4j://host:port）
+            # 解析 URL（格式：neo4j://host:port 或 bolt://host:port）
+            # 单实例使用 bolt://，集群使用 neo4j://
             # 如果 URL 包含密码，直接使用；否则使用环境变量中的密码
             driver = GraphDatabase.driver(
                 ZEABUR_NEO4J_URL,
@@ -271,7 +278,7 @@ class TestZeaburRestApi:
         assert "llm" in data["components"]
     
     def test_process_endpoint(self, http_client, unique_user_id):
-        """测试 POST /process 处理记忆（v3 格式）"""
+        """测试 POST /process 处理记忆"""
         payload = {
             "input": "测试记忆内容",
             "user_id": unique_user_id

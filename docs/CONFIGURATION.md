@@ -93,9 +93,9 @@ SILICONFLOW_EMBEDDING_CONFIG = {
 "graph_store": {
     "provider": "neo4j",
     "config": {
-        "url": "neo4j://localhost:17687",
+        "url": "bolt://localhost:17687",  # 单实例使用 bolt://，集群使用 neo4j://
         "username": "neo4j",
-        "password": "password123",
+        "password": "zeabur2025",
     },
 }
 ```
@@ -147,7 +147,7 @@ services:
       - "7474:7474"   # Browser UI
       - "17687:7687"  # Bolt 协议 (注意: 映射到 17687)
     environment:
-      - NEO4J_AUTH=neo4j/password123
+      - NEO4J_AUTH=neo4j/zeabur2025
       - NEO4J_PLUGINS=["apoc", "graph-data-science"]
 
   qdrant:

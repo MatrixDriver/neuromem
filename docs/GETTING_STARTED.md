@@ -55,7 +55,7 @@ docker-compose ps
 
 | 服务 | 地址 | 凭证 |
 |------|------|------|
-| Neo4j Browser | http://localhost:7474 | neo4j / password123 |
+| Neo4j Browser | http://localhost:7474 | neo4j / zeabur2025 |
 | Qdrant API | http://localhost:6400 | 无需认证 |
 | Qdrant Dashboard | http://localhost:6400/dashboard | 无需认证 |
 

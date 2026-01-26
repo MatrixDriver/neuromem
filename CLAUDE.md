@@ -27,28 +27,22 @@ NeuroMemory 是一个神经符号混合记忆系统（Neuro-Symbolic Hybrid Memo
 ## 常用命令
 
 ```bash
-# 启动数据库服务
+# 启动所有服务（app + neo4j + qdrant）
 docker-compose up -d
 
-# 停止服务
+# 查看服务日志
+docker-compose logs -f app
+
+# 停止所有服务
 docker-compose down
 
-# 激活虚拟环境 (PowerShell)
-.\.venv\Scripts\Activate.ps1
+# 重建并启动（代码更新后）
+docker-compose up -d --build
 
-# 安装依赖
-uv pip install -e ".[dev]"
-
-# 运行 CLI 交互模式
-python main.py
-
-# 启动 HTTP Server（开发模式）
-uvicorn http_server:app --host 0.0.0.0 --port 8765 --reload
-
-# 运行测试
-pytest                                    # 全部测试
-pytest -m "not slow"                      # 跳过 LLM 调用的测试
-pytest tests/test_cognitive.py::TestPrivacyFilter  # 运行特定测试类
+# 运行测试（需先激活虚拟环境）
+.\.venv\Scripts\Activate.ps1      # PowerShell
+pytest                             # 全部测试
+pytest -m "not slow"               # 跳过 LLM 调用的测试
 ```
 
 ### CLI 工具
@@ -67,11 +61,11 @@ pytest tests/test_cognitive.py::TestPrivacyFilter  # 运行特定测试类
 
 ## 服务访问
 
-**本地：**
-- Neo4j Browser: http://localhost:7474 (用户名: `neo4j`, 密码: `password123`)
-- Qdrant API: http://localhost:6400
-- REST API: http://localhost:8765 (需手动启动)
+**本地（docker-compose up -d 后）：**
+- REST API: http://localhost:8765
 - API 文档: http://localhost:8765/docs (Swagger UI)
+- Neo4j Browser: http://localhost:7474 (用户名: `neo4j`, 密码: `zeabur2025`)
+- Qdrant API: http://localhost:6400
 
 **ZeaBur 远程：**  
 - REST API: https://neuromemory.zeabur.app/ ；API 文档: https://neuromemory.zeabur.app/docs  
@@ -149,6 +143,6 @@ SILICONFLOW_API_KEY=your-siliconflow-api-key
 - MCP：在 `main()` 进入 `stdio_server` 的 async 上下文后、`server.run` 之前调用
 - 无 running event loop 时（如 CLI 单次 `asyncio.run`），`start_timeout_checker` 会静默跳过
 
-**API 格式升级**：修改响应格式（如 v2→v3）时，**成功与错误两种响应**、以及端点的 **docstring / OpenAPI** 需一并更新，避免错误分支或文档沿用旧字段名。
+**API 格式升级**：修改响应格式时，**成功与错误两种响应**、以及端点的 **docstring / OpenAPI** 需一并更新，避免错误分支或文档沿用旧字段名。
 
 **反模式**：不要在 `return` 之后写逻辑，会变成不可达代码；建议在 CI 中启用 unreachable / dead-code 检查（如 pyright）。

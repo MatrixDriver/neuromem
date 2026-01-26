@@ -1,4 +1,4 @@
-﻿============================= test session starts =============================
+============================= test session starts =============================
 platform win32 -- Python 3.13.11, pytest-9.0.2, pluggy-1.6.0 -- D:\CODE\NeuroMemory\.venv\Scripts\python.exe
 cachedir: .pytest_cache
 rootdir: D:\CODE\NeuroMemory
@@ -45,7 +45,7 @@ tests/test_cognitive.py::TestPrivacyFilter::test_public_query
 PASSED
 tests/test_cognitive.py::TestPrivateBrain::test_process_returns_json_format 
 ============================================================
-初始化 PrivateBrain (v2 架构)...
+初始化 PrivateBrain...
 当前配置: LLM=deepseek, Embedding=siliconflow
 ============================================================
 执行预热调用...
@@ -218,7 +218,7 @@ tests/test_session.py::TestSessionConsolidator::test_consolidate_with_events
 PASSED
 tests/test_session.py::TestSessionIntegration::test_multi_turn_conversation 
 ============================================================
-初始化 PrivateBrain (v3.0 Session 管理)...
+初始化 PrivateBrain (Session 管理)...
 当前配置: LLM=deepseek, Embedding=siliconflow
 ============================================================
 执行预热调用...

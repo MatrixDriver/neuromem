@@ -1,6 +1,6 @@
 ---
 name: session-memory-management
-overview: 实现 NeuroMemory v3.0 Session 记忆管理系统，包括内部自动 Session 管理、双层记忆模型（短期内存 + 长期 Qdrant+Neo4j）、指代消解机制和 Session 整合功能。
+overview: 实现 NeuroMemory Session 记忆管理系统，包括内部自动 Session 管理、双层记忆模型（短期内存 + 长期 Qdrant+Neo4j）、指代消解机制和 Session 整合功能。
 todos:
   - id: session-infra
     content: "阶段 1: 创建 Session 基础设施（session_manager.py, config.py 更新, 数据结构定义）"
@@ -26,9 +26,9 @@ todos:
 isProject: false
 ---
 
-# 功能：Session 记忆管理系统 (v3.0)
+# 功能：Session 记忆管理系统
 
-基于 [docs/SESSION_MEMORY_DESIGN.md](../SESSION_MEMORY_DESIGN.md) 设计文档，实现 NeuroMemory v3.0 的 Session 记忆管理功能。
+基于 [docs/SESSION_MEMORY_DESIGN.md](../SESSION_MEMORY_DESIGN.md) 设计文档，实现 NeuroMemory 的 Session 记忆管理功能。
 
 ## 功能描述
 
@@ -54,7 +54,7 @@ isProject: false
 
 ## 问题陈述
 
-当前 v2.0 架构存在以下问题：
+当前架构存在以下问题：
 1. 无法处理跨轮次的指代消解（如"这个"、"她"等代词）
 2. 每次输入都立即存储，无法利用对话上下文进行语义分组和合并
 3. 返回格式不够直观（vector_chunks 暴露实现细节）
@@ -71,7 +71,7 @@ isProject: false
 
 ## 功能元数据
 
-**功能类型**：新功能（v3.0 架构升级）
+**功能类型**：新功能（架构升级）
 **估计复杂度**：高
 **主要受影响的系统**：
 - `private_brain.py` - 核心处理逻辑
@@ -183,7 +183,7 @@ isProject: false
 **任务**：
 1. 重构 `private_brain.py` 的 `process()` 方法
 2. 添加 `end_session()` 方法
-3. 更新返回格式（v3 格式）
+3. 更新返回格式
 
 ### 阶段 4：API 更新
 
@@ -285,7 +285,7 @@ isProject: false
      - 获取最近事件进行指代消解
      - 使用消解后的查询检索长期记忆
      - 创建 Event 并添加到 Session
-     - 返回 v3 格式（memories/relations/resolved_query）
+     - 返回格式（memories/relations/resolved_query）
   3. 添加 `end_session(user_id: str) -> dict` 方法
   4. 更新 `_retrieve()` 返回格式
 - **PATTERN**：参考 `private_brain.py` 第 217-240 行的 process 方法
@@ -444,7 +444,7 @@ python mcp_server.py
 - [ ] 显式 `end_session()` 正确触发整合
 - [ ] 整合后的记忆正确存储到长期记忆
 - [ ] 隐私过滤在整合时正确工作
-- [ ] `process_memory()` 返回 v3 格式（memories/relations/resolved_query）
+- [ ] `process_memory()` 返回格式（memories/relations/resolved_query）
 - [ ] HTTP API 新端点正常工作
 - [ ] MCP Tools 新 tools 正常工作
 - [ ] 所有单元测试通过

@@ -253,9 +253,9 @@ MEM0_CONFIG = {
     "graph_store": {
         "provider": "neo4j",
         "config": {
-            "url": "neo4j://localhost:17687",
+            "url": "bolt://localhost:17687",  # 单实例使用 bolt://，集群使用 neo4j://
             "username": "neo4j",
-            "password": "password123",
+            "password": "zeabur2025",
         }
     },
     

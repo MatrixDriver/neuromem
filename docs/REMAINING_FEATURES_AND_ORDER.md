@@ -8,7 +8,7 @@
 
 | 特性 | 文档位置 | 实现位置 |
 |------|----------|----------|
-| REST API /api/v1 | API.md 已标 ✅ | http_server.py: APIRouter /api/v1 |
+| REST API | API.md 已标 ✅ | http_server.py: REST API 端点 |
 | Session 记忆管理 v3 | SESSION_MEMORY_DESIGN 标「待实现」 | session_manager, consolidator, coreference；private_brain、/end-session、/session-status |
 | 性能优化-异步整合 | PERFORMANCE_OPTIMIZATION 标已完成 | v3 整合在 Session 结束路径；PERFORMANCE 中的「cognitive_process」已由 process/consolidation 替代 |
 
@@ -72,7 +72,7 @@
 ### 第一批：接入层补齐（提升易用与调试）
 
 1. **Python SDK（NeuroMemory 类）**  
-   - **原因**：ARCHITECTURE 标 P0/「优先实现」；PrivateBrain、/api/v1 已具备能力，SDK 主要为薄封装 + `neuromemory` 包与 `NeuroMemory` 类。  
+   - **原因**：ARCHITECTURE 标 P0/「优先实现」；PrivateBrain、REST API 已具备能力，SDK 主要为薄封装 + `neuromemory` 包与 `NeuroMemory` 类。  
    - **产出**：`neuromemory` 包、`NeuroMemory(config).add/search/ask/get_graph`，`metadata` 透传或扩展；可被 CLI 或应用直接复用。
 
 2. **CLI 工具**  
@@ -102,7 +102,7 @@
 ### 第四批：架构扩展（按需）
 
 7. **图谱可视化**  
-   - 实现 `graph visualize`，或独立 Web 页，读取 `get_user_graph`/`/api/v1/graph` 展示 nodes/edges。
+   - 实现 `graph visualize`，或独立 Web 页，读取 `get_user_graph`/`/graph/{user_id}` 展示 nodes/edges。
 
 8. **批量导入**  
    - 文档解析（PDF/TXT 等）→ 分片 → 调用 `add` 或批量接口。

@@ -31,7 +31,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . ./
 
 # 创建非 root 用户（安全最佳实践）
-RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser && \
+# -m 创建 home 目录，mem0 库需要在 ~/.mem0 写入配置
+RUN groupadd -r appuser && useradd -r -g appuser -u 1000 -m appuser && \
     chown -R appuser:appuser /app
 USER appuser
 

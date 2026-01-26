@@ -119,7 +119,7 @@
 | 项目 | 内容 |
 |------|------|
 | **planned** | 无直接对应；属于实现质量 |
-| **actual** | `_get_consolidator()` 在 `return self._consolidator` 之后有一行 `logger.info("PrivateBrain 初始化完成（v3.0 Session 管理）")`，永远不可达 |
+| **actual** | `_get_consolidator()` 在 `return self._consolidator` 之后有一行 `logger.info("PrivateBrain 初始化完成（Session 管理）")`，永远不可达 |
 | **reason** | 推断为从 `__init__` 移动或合并逻辑时遗留 |
 | **classification** | ❌ bad |
 | **justified** | no |
@@ -200,7 +200,7 @@
 ### 针对本功能的立即代码修复建议（非流程类）
 
 - [ ] **启动超时检查**：在 `http_server` 的 `lifespan`（或 `@app.on_event("startup")`）中，在确保有 running loop 的时机调用 `get_session_manager().start_timeout_checker()`；若使用 `main.py` 的 CLI，在合适位置以同样方式调用；若当前无稳定 loop，则需在计划/设计中先明确「超时检查在何种运行时下启用」。
-- [ ] **移除不可达代码**：从 `_get_consolidator` 中删除 `return` 之后的 `logger.info("PrivateBrain 初始化完成（v3.0 Session 管理）")`，或将该日志移入 `__init__` 的合适位置。
+- [ ] **移除不可达代码**：从 `_get_consolidator` 中删除 `return` 之后的 `logger.info("PrivateBrain 初始化完成（Session 管理）")`，或将该日志移入 `__init__` 的合适位置。
 - [ ] **统一 `/process` 的 v3 与文档**：  
   - 错误响应改为 v3 风格字段（如 `memories`、`relations`、`resolved_query`，或至少与 v3 的 `metadata` 结构兼容）；  
   - 将该端点的 docstring 更新为 v3 的 `memories`、`relations`、`resolved_query`、`metadata`。

@@ -45,7 +45,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="process_memory",
-            description="""处理用户输入，检索相关记忆并异步存储（v3.0）。
+            description="""处理用户输入，检索相关记忆并异步存储。
             
 返回结构化 JSON，包含：
 - resolved_query: 指代消解后的查询

@@ -2,7 +2,6 @@
 
 > 面向普通客户的用户接口文档 | 返回 [主架构文档](ARCHITECTURE.md)
 >
-> **版本**: v3.0  
 > **最后更新**: 2026-01-24
 >
 > **注意**：本文档涵盖所有 REST API 端点。
@@ -188,7 +187,7 @@ Content-Type: application/json
 }
 ```
 
-#### 响应示例（有记忆，v3 格式）
+#### 响应示例（有记忆）
 
 ```json
 {
@@ -260,7 +259,7 @@ Content-Type: application/json
 
 返回详细的处理过程报告（自然语言格式），用于开发调试和验证系统行为。
 
-**注意：** 调试模式走**旧版流程**，不与生产模式一致：**不写 Session、不做指代消解**，仅演示「检索 + 隐私分类 + 存储决策」；用于观察分类与存储行为时使用。生产级流程（Session、指代消解、v3 格式）请使用 `POST /process`。
+**注意：** 调试模式走**旧版流程**，不与生产模式一致：**不写 Session、不做指代消解**，仅演示「检索 + 隐私分类 + 存储决策」；用于观察分类与存储行为时使用。生产级流程（Session、指代消解）请使用 `POST /process`。
 
 #### 请求
 
@@ -675,7 +674,7 @@ Invoke-RestMethod -Uri "https://neuromemory.zeabur.app/ask" -Method Post -Conten
 
 NeuroMemory 采用**静默降级**策略，确保不影响主流程 LLM 的运行。
 
-### 错误响应示例（v3 格式）
+### 错误响应示例
 
 ```json
 {

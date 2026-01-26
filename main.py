@@ -1,8 +1,8 @@
 """
-NeuroMemory 主程序（v2）
+NeuroMemory 主程序
 命令行演示工具 - 基于 PrivateBrain 的 Y 型分流架构
 
-v2 架构核心：
+架构核心：
 - 只检索，不推理（推理交给调用方的主 LLM）
 - 隐私过滤：PRIVATE 数据存储，PUBLIC 数据丢弃
 - Y 型分流：同步返回检索结果，异步执行存储决策
@@ -188,7 +188,7 @@ def classify_intent(user_input: str) -> IntentResult:
 
 def demo_v2_architecture():
     """
-    演示 v2 架构：Y 型分流 + 隐私过滤
+    演示架构：Y 型分流 + 隐私过滤
     
     展示：
     1. 私有数据被正确存储
@@ -196,7 +196,7 @@ def demo_v2_architecture():
     3. 检索返回结构化 JSON
     """
     print("=" * 60)
-    print("NeuroMemory v2 架构演示")
+    print("NeuroMemory 架构演示")
     print(f"当前配置: LLM={LLM_PROVIDER}, Embedding={EMBEDDING_PROVIDER}")
     print("=" * 60)
     
@@ -264,16 +264,16 @@ def demo_v2_architecture():
 
 def demo_multi_hop_reasoning():
     """
-    演示多跳推理能力（v2 版本）
+    演示多跳推理能力
     
-    注意：v2 架构中，NeuroMemory 只负责检索，不做推理。
+    注意：NeuroMemory 只负责检索，不做推理。
     此演示展示检索结果，推理由调用方完成。
     """
     print("=" * 60)
-    print("NeuroMemory v2 多跳检索演示")
+    print("NeuroMemory 多跳检索演示")
     print(f"当前配置: LLM={LLM_PROVIDER}, Embedding={EMBEDDING_PROVIDER}")
     print("=" * 60)
-    print("\n注意：v2 架构中，NeuroMemory 只负责检索，不做推理。")
+    print("\n注意：NeuroMemory 只负责检索，不做推理。")
     print("以下展示检索结果，推理应由调用方的主 LLM 完成。")
     
     brain = PrivateBrain()
@@ -322,7 +322,7 @@ def demo_multi_hop_reasoning():
 
 
 if __name__ == "__main__":
-    # 默认运行 v2 架构演示
+    # 默认运行架构演示
     demo_v2_architecture()
     
     # 也可以运行多跳检索演示

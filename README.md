@@ -9,9 +9,9 @@
 - **混合记忆架构**: 结合 Neo4j 知识图谱与 Qdrant 向量数据库，同时处理结构化逻辑和模糊语义
 - **多跳推理**: 通过图谱路径实现复杂的实体关系推理，如 `Demis → DeepMind → Gemini`
 - **自动知识提取**: 利用 LLM 自动从对话中提取实体关系并构建知识图谱
-- **Session 管理 (v3.0)**: 内部自动管理短期记忆，超时自动整合为长期记忆
-- **指代消解 (v3.0)**: 检索时规则匹配，整合时 LLM 消解，支持跨轮次指代
-- **隐私过滤 (v3.0)**: LLM 分类 PRIVATE/PUBLIC，只存储私有数据
+- **Session 管理**: 内部自动管理短期记忆，超时自动整合为长期记忆
+- **指代消解**: 检索时规则匹配，整合时 LLM 消解，支持跨轮次指代
+- **隐私过滤**: LLM 分类 PRIVATE/PUBLIC，只存储私有数据
 - **灵活的模型切换**: 支持 DeepSeek / Gemini 作为推理引擎，本地 HuggingFace / Gemini / SiliconFlow 作为 Embedding
 - **记忆演化**: 知识图谱具有自我纠错能力，随使用时间形成致密的专家知识网络
 - **多种接入方式**: REST API、CLI 工具、MCP Server
@@ -47,11 +47,11 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 认知流程 (v3.0)
+### 认知流程
 
 1. **Session 管理**: 自动获取或创建 Session，管理短期记忆
 2. **指代消解（检索时）**: 规则匹配，快速消解代词（"这个"→名词、"她/他"→人名）
-3. **混合检索**: 并行执行向量搜索和图谱遍历，返回 v3 格式结果
+3. **混合检索**: 并行执行向量搜索和图谱遍历，返回结构化结果
 4. **返回结果**: 立即返回 `memories`、`relations`、`resolved_query`
 5. **Session 整合（后台）**: Session 超时或显式结束时，LLM 消解 + 隐私过滤 + 存储
 
@@ -127,7 +127,7 @@ docker-compose up -d
 ```
 
 服务启动后：
-- Neo4j Browser: http://localhost:7474 (用户名: `neo4j`, 密码: `password123`)
+- Neo4j Browser: http://localhost:7474 (用户名: `neo4j`, 密码: `zeabur2025`)
 - Qdrant API: http://localhost:6400
 
 ### 6. 运行演示
@@ -188,7 +188,7 @@ curl -X POST http://localhost:8765/process \
 ### REST API
 
 ```bash
-# 处理记忆（生产模式，v3.0）
+# 处理记忆（生产模式）
 curl -X POST http://localhost:8765/process \
   -H "Content-Type: application/json" \
   -d '{"input": "我女儿叫灿灿，今年5岁了", "user_id": "user_001"}'
@@ -232,11 +232,11 @@ neuromemory graph visualize --user user_001 --open-browser
 ```
 NeuroMemory/
 ├── config.py              # 配置模块（模型切换、数据库连接）
-├── private_brain.py       # 核心处理引擎（v3.0）
-├── session_manager.py     # Session 管理器（v3.0）
-├── coreference.py         # 指代消解器（v3.0）
-├── consolidator.py        # Session 整合器（v3.0）
-├── privacy_filter.py      # 隐私过滤器（v3.0）
+├── private_brain.py       # 核心处理引擎
+├── session_manager.py     # Session 管理器
+├── coreference.py         # 指代消解器
+├── consolidator.py        # Session 整合器
+├── privacy_filter.py      # 隐私过滤器
 ├── http_server.py         # REST API 服务（FastAPI）
 ├── mcp_server.py          # MCP Server
 ├── main.py                # CLI 演示工具

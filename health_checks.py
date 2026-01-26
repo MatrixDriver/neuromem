@@ -1,7 +1,7 @@
 """
 Health check helpers for Neo4j, Qdrant, and LLM configuration.
 
-Used by /api/v1/health to populate components: {neo4j, qdrant, llm}。
+Used by /health to populate components: {neo4j, qdrant, llm}。
 
 check_llm_config 使用 os.getenv，依赖 .env 已加载。本模块的
 `from config import ...` 会在导入时触发 config 的 load_dotenv；单独使用

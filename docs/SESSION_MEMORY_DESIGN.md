@@ -1,6 +1,5 @@
 # NeuroMemory Session 记忆管理设计文档
 
-> **版本**: v3.0  
 > **最后更新**: 2026-01-22  
 > **状态**: 设计文档，待实现  
 > **参考**: [AWS Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)
@@ -585,9 +584,9 @@ def get_session_status(user_id: str) -> dict:
 }
 ```
 
-### 6.5 与 v2 格式对比
+### 6.5 格式说明
 
-| v2 格式 | v3 格式 | 变更原因 |
+| 旧格式 | 当前格式 | 变更原因 |
 |---------|---------|----------|
 | `vector_chunks` | `memories` | 更直观，隐藏实现细节 |
 | `vector_chunks[].memory` | `memories[].content` | 更通用的命名 |
@@ -911,8 +910,8 @@ class MemoryStrategy(ABC):
 | 1 | 编写 SessionManager 单元测试 |
 | 2 | 编写指代消解单元测试（规则 + LLM） |
 | 3 | 编写 Session 整合集成测试 |
-| 4 | 更新 `USER_API.md` 文档（v3 格式） |
-| 5 | 更新 `ARCHITECTURE.md` 为 v3 版本 |
+| 4 | 更新 `USER_API.md` 文档 |
+| 5 | 更新 `ARCHITECTURE.md` |
 
 ### 9.6 后续阶段（可选）
 

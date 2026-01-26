@@ -131,7 +131,7 @@ docker-compose ps
 **健康检查**
 
 - `GET /health`：仅表示进程就绪，用于 ZeaBur 存活探测。
-- `GET /api/v1/health`：返回 `components: {neo4j, qdrant, llm}`，用于排查数据库与 LLM 配置。
+- `GET /health`：返回 `components: {neo4j, qdrant, llm}`，用于排查数据库与 LLM 配置。
 
 ---
 

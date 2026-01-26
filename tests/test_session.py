@@ -1,5 +1,5 @@
 """
-NeuroMemory v3.0 Session 管理测试套件
+NeuroMemory Session 管理测试套件
 
 测试 Session 管理、指代消解和整合功能：
 - SessionManager 生命周期测试
@@ -37,8 +37,14 @@ pytestmark = pytest.mark.timeout(30)
 # 工具函数
 # =============================================================================
 
-def check_database_available(host="localhost", port=6400, timeout=1):
+def check_database_available(host=None, port=6400, timeout=1):
     """检查数据库服务是否可用"""
+    # 如果没有指定 host，从配置中读取
+    if host is None:
+        import config
+        host = config.MEM0_CONFIG.get("vector_store", {}).get("config", {}).get("host", "localhost")
+        port = config.MEM0_CONFIG.get("vector_store", {}).get("config", {}).get("port", 6400)
+    
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
@@ -61,15 +67,29 @@ def brain():
     import openai.resources.chat  # noqa: F401
     import openai.resources.embeddings  # noqa: F401
     
+    # 确保使用最新的配置（conftest.py 中的 target_env 已重新加载 config）
+    import importlib
+    import config
+    importlib.reload(config)
+    
     from private_brain import PrivateBrain
     
-    # 检查数据库是否可用
+    # 显示当前数据库配置
+    from config import MEM0_CONFIG
+    qdrant_host = MEM0_CONFIG.get("vector_store", {}).get("config", {}).get("host", "unknown")
+    qdrant_port = MEM0_CONFIG.get("vector_store", {}).get("config", {}).get("port", "unknown")
+    neo4j_url = "未启用"
+    if "graph_store" in MEM0_CONFIG:
+        neo4j_url = MEM0_CONFIG["graph_store"].get("config", {}).get("url", "unknown")
+    
+    # 检查数据库是否可用（使用配置中的 host）
     if not check_database_available():
-        pytest.skip("Qdrant 数据库未运行，请先启动: docker-compose up -d")
+        pytest.skip(f"Qdrant 数据库未运行 ({qdrant_host}:{qdrant_port})，请先启动: docker-compose up -d")
     
     print("\n" + "=" * 60)
-    print("初始化 PrivateBrain (v3.0 Session 管理)...")
+    print("初始化 PrivateBrain (Session 管理)...")
     print(f"当前配置: LLM={LLM_PROVIDER}, Embedding={EMBEDDING_PROVIDER}")
+    print(f"数据库: Qdrant={qdrant_host}:{qdrant_port}, Neo4j={neo4j_url}")
     print("=" * 60)
     
     try:

@@ -173,10 +173,10 @@ if ENABLE_GRAPH_STORE:
     else:
         _h = os.getenv("NEO4J_NEUROMEMORY_HOST") or os.getenv("NEO4J_HOST") or "localhost"
         _p = int(os.getenv("NEO4J_BOLT_PORT", "17687"))
-        neo4j_url = f"neo4j://{_h}:{_p}"
+        neo4j_url = f"bolt://{_h}:{_p}"  # 单实例使用 bolt://，集群使用 neo4j://
 
     neo4j_username = os.getenv("NEO4J_USERNAME", "neo4j")
-    neo4j_password = _get_env_var("NEO4J_PASSWORD", "Neo4jPassword", default="password123")
+    neo4j_password = _get_env_var("NEO4J_PASSWORD", "Neo4jPassword", default="zeabur2025")
 
     MEM0_CONFIG["graph_store"] = {
         "provider": "neo4j",
@@ -284,3 +284,17 @@ SESSION_CHECK_INTERVAL_SECONDS = 60  # 每分钟检查一次
 
 # 检索时用于消解的最近事件数
 COREFERENCE_CONTEXT_SIZE = int(os.getenv("COREFERENCE_CONTEXT_SIZE", 5))  # 默认最近 5 条
+
+# =============================================================================
+# ZeaBur 测试配置
+# =============================================================================
+
+ZEABUR_TEST_CONFIG = {
+    "base_url": os.getenv("ZEABUR_BASE_URL", "https://neuromemory.zeabur.app").rstrip("/"),
+    "neo4j_url": os.getenv("ZEABUR_NEO4J_URL"),  # 可选，如 neo4j://neo4j-neuromemory:7687
+    "neo4j_host": os.getenv("ZEABUR_NEO4J_HOST", "neo4j-neuromemory"),  # ZeaBur 内部服务名称，默认值很少修改
+    "neo4j_password": _get_env_var("ZEABUR_NEO4J_PASSWORD", "Neo4jPassword", default="zeabur2025"),
+    "qdrant_host": os.getenv("ZEABUR_QDRANT_HOST", "qdrant-neuromemory"),  # ZeaBur 内部服务名称，默认值很少修改
+    "qdrant_port": int(os.getenv("ZEABUR_QDRANT_PORT", "6400")),
+    "http_timeout": int(os.getenv("ZEABUR_HTTP_TIMEOUT", "30")),
+}

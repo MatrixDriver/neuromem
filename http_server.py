@@ -53,7 +53,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="NeuroMemory API",
     description="私有化外挂大脑服务 - Memory-as-a-Service",
-    version="3.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -119,8 +118,8 @@ class AskResponse(BaseModel):
     sources: list
 
 
-class HealthV1Response(BaseModel):
-    """健康检查 v1 响应（含 components）"""
+class HealthResponse(BaseModel):
+    """健康检查响应（含 components）"""
     status: str
     service: str = "neuro-memory"
     components: dict  # {"neo4j": bool, "qdrant": bool, "llm": bool}
@@ -139,7 +138,6 @@ def read_root() -> dict:
     """
     return {
         "service": "neuro-memory",
-        "version": "3.0.0",
         "docs": "/docs",
         "health": "/health",
     }
@@ -148,9 +146,9 @@ def read_root() -> dict:
 @app.post("/process", summary="处理记忆（生产模式）")
 async def process_memory(request: ProcessRequest) -> dict:
     """
-    处理用户输入，检索相关记忆并异步存储（v3.0 Session 管理）。
+    处理用户输入，检索相关记忆并异步存储（Session 管理）。
     
-    返回结构化 JSON（v3 格式），包含：
+    返回结构化 JSON，包含：
     - resolved_query: 指代消解后的查询
     - memories: 语义相关的记忆片段
     - relations: 知识图谱中的关系
@@ -166,7 +164,7 @@ async def process_memory(request: ProcessRequest) -> dict:
         return result
     except Exception as e:
         logger.error(f"[/process] 处理失败: {e}")
-        # 静默降级：返回 v3 格式的空结果
+        # 静默降级：返回空结果
         return {
             "status": "error",
             "resolved_query": request.input,
@@ -186,7 +184,7 @@ async def debug_process_memory(request: ProcessRequest) -> DebugResponse:
     调试模式：处理用户输入并返回详细的处理过程（旧版流程）。
     
     不写 Session、不做指代消解，仅演示检索 + 隐私分类 + 存储决策；适用于观察
-    分类与存储行为。生产级流程（Session、指代消解、v3 格式）请使用 POST /process。
+    分类与存储行为。生产级流程（Session、指代消解）请使用 POST /process。
     
     报告包含：检索过程、存储决策、性能统计、原始数据。
     """
@@ -285,7 +283,7 @@ async def get_session_status(user_id: str) -> dict:
 
 
 @app.get("/health", summary="健康检查")
-async def health_check() -> HealthV1Response:
+async def health_check() -> HealthResponse:
     """
     健康检查 - 检查所有关键服务状态。
 
@@ -297,7 +295,7 @@ async def health_check() -> HealthV1Response:
     qdrant_ok = check_qdrant()
     llm_ok = check_llm_config()
     status = "healthy" if (neo4j_ok and qdrant_ok) else "unhealthy"
-    return HealthV1Response(
+    return HealthResponse(
         status=status,
         service="neuro-memory",
         components={"neo4j": neo4j_ok, "qdrant": qdrant_ok, "llm": llm_ok},

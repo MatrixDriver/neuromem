@@ -5,7 +5,7 @@ PrivateBrain - 私有化外挂大脑核心模块
 - 同步路径：检索相关记忆，立即返回结构化上下文
 - 异步路径：隐私分类 + 记忆写入（Fire-and-forget）
 
-v3.0 新增：
+新增功能：
 - Session 管理：内部自动管理短期记忆
 - 指代消解：检索时规则匹配，整合时 LLM 消解
 """
@@ -49,10 +49,10 @@ GRAPH_MAX_DEPTH = 2
 
 @dataclass
 class RetrievalResult:
-    """检索结果（v3 格式）"""
-    memories: list[dict] = field(default_factory=list)  # v3: 语义化命名
-    relations: list[dict] = field(default_factory=list)  # v3: 简化命名
-    resolved_query: str = ""  # v3: 消解后的查询
+    """检索结果"""
+    memories: list[dict] = field(default_factory=list)  # 语义化命名
+    relations: list[dict] = field(default_factory=list)  # 简化命名
+    resolved_query: str = ""  # 消解后的查询
     retrieval_time_ms: int = 0
     
     @property
@@ -60,7 +60,7 @@ class RetrievalResult:
         return len(self.memories) > 0 or len(self.relations) > 0
     
     def to_dict(self) -> dict:
-        """转换为 JSON 可序列化的字典（v3 格式）"""
+        """转换为 JSON 可序列化的字典"""
         return {
             "status": "success",
             "resolved_query": self.resolved_query,
@@ -224,7 +224,7 @@ class PrivateBrain:
             thread_name_prefix="brain_consolidate"
         )
         
-        # v3.0: Session 管理和指代消解
+        # Session 管理和指代消解
         self.session_manager = get_session_manager()
         self.coreference_resolver = get_coreference_resolver()
         # 延迟导入 consolidator，避免循环导入
@@ -232,7 +232,7 @@ class PrivateBrain:
         
         # 设置整合回调
         self.session_manager.set_consolidate_callback(self._consolidate_session_sync)
-        logger.info("PrivateBrain 初始化完成（v3.0 Session 管理）")
+        logger.info("PrivateBrain 初始化完成（Session 管理）")
     
     def _get_consolidator(self):
         """延迟获取 consolidator 实例，避免循环导入"""
@@ -243,7 +243,7 @@ class PrivateBrain:
     
     async def _process_async(self, input_text: str, user_id: str) -> dict:
         """
-        处理用户输入的异步实现（v3.0 流程）。
+        处理用户输入的异步实现。
         供 process_async 与 process（仅同步/无 loop 时）使用。
         """
         # 1. 获取或创建 Session
@@ -272,28 +272,28 @@ class PrivateBrain:
     
     async def process_async(self, input_text: str, user_id: str) -> dict:
         """
-        处理用户输入（生产模式，v3.0，异步入口）。
+        处理用户输入（生产模式，异步入口）。
         
         在已有 event loop 的上下文中使用（如 FastAPI、MCP）时，应调用本方法并用
         await；否则会因 process() 内部的 asyncio.run() 触发 RuntimeError。
         
-        v3.0 流程同 process()；返回 v3 格式（memories/relations/resolved_query）。
+        流程同 process()；返回格式（memories/relations/resolved_query）。
         """
         return await self._process_async(input_text, user_id)
     
     def process(self, input_text: str, user_id: str) -> dict:
         """
-        处理用户输入（生产模式，v3.0，同步入口）
+        处理用户输入（生产模式，同步入口）
         
         仅用于无运行中 event loop 的上下文（如 pytest、CLI、脚本）。从
         async  handler（FastAPI、MCP）调用时请使用 process_async 并 await。
         
-        v3.0 流程：
+        流程：
         1. 获取或创建 Session
         2. 获取最近事件进行指代消解
         3. 使用消解后的查询检索长期记忆
         4. 创建 Event 并添加到 Session
-        5. 返回 v3 格式（memories/relations/resolved_query）
+        5. 返回格式（memories/relations/resolved_query）
         """
         return asyncio.run(self._process_async(input_text, user_id))
     
@@ -429,7 +429,7 @@ class PrivateBrain:
             limit: 返回的记忆与关系数量上限，默认 10
             
         Returns:
-            检索结果（v3 格式：memories, relations, metadata）
+            检索结果（memories, relations, metadata）
         """
         return self._retrieve(query, user_id, limit=limit).to_dict()
     
@@ -506,7 +506,7 @@ class PrivateBrain:
     
     def _retrieve(self, query: str, user_id: str, limit: int | None = None) -> RetrievalResult:
         """
-        内部检索方法（v3.0 格式）。
+        内部检索方法。
         limit 为 None 时使用 VECTOR_TOP_K / GRAPH_MAX_RELATIONS，与 process 等原有行为一致。
         
         Args:
@@ -515,7 +515,7 @@ class PrivateBrain:
             limit: 记忆与关系数量上限；None 时用模块常量
             
         Returns:
-            RetrievalResult 对象（v3 格式）
+            RetrievalResult 对象
         """
         start_time = time.perf_counter()
         cap_vec = limit if limit is not None else VECTOR_TOP_K
@@ -541,15 +541,15 @@ class PrivateBrain:
             raw_vectors = []
             raw_relations = []
         
-        # 处理向量结果（v3 格式：memories）
+        # 处理向量结果（memories）
         for item in raw_vectors[:cap_vec]:
             if isinstance(item, dict):
                 memories.append({
-                    "content": item.get("memory", str(item)),  # v3: content 替代 memory
+                    "content": item.get("memory", str(item)),  # content 替代 memory
                     "score": item.get("score", 0),
                 })
         
-        # 处理图谱关系（v3 格式：relations，简化字段名）
+        # 处理图谱关系（relations，简化字段名）
         deduped_relations = _dedupe_relations(raw_relations)[:cap_rel]
         for rel in deduped_relations:
             relations.append({
@@ -604,7 +604,7 @@ class PrivateBrain:
     
     async def end_session_async(self, user_id: str) -> dict:
         """
-        显式结束用户的当前会话（v3.0，异步入口）。
+        显式结束用户的当前会话（异步入口）。
         
         在已有 event loop 的上下文中（如 FastAPI、MCP）应调用本方法并 await；
         否则 end_session() 内部的 asyncio.run() 会触发 RuntimeError。
@@ -624,7 +624,7 @@ class PrivateBrain:
     
     def end_session(self, user_id: str) -> dict:
         """
-        显式结束用户的当前会话（v3.0，同步入口）
+        显式结束用户的当前会话（同步入口）
         
         仅用于无运行中 event loop 的上下文（如 pytest、CLI）。从
         async handler（FastAPI、MCP）调用时请使用 end_session_async 并 await。

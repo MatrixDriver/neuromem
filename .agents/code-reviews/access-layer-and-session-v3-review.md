@@ -88,7 +88,7 @@
 
 **detail:** 新贡献者按 TESTING.md 拷贝示例时，会得到 KeyError 或错误断言。
 
-**suggestion:** 将示例更新为 v3 格式，例如：  
+**suggestion:** 将示例更新为当前格式，例如：  
 `assert "memories" in result`、`for m in result["memories"]` 等，与 `test_cognitive.py` 及 `REST_API.md` 保持一致。
 
 ---
@@ -137,7 +137,7 @@
   - `PrivateBrain._get_consolidator`、`consolidator._get_brain` 的延迟导入避免循环依赖。  
 
 - **API 与 SDK：**  
-  - `/api/v1` 路由与根路径 `/process`、`/graph`、`/health` 等并存，Pydantic 模型与 `REST_API.md` 描述一致。  
+  - REST API 路由与根路径 `/process`、`/graph`、`/health` 等并存，Pydantic 模型与 `REST_API.md` 描述一致。  
   - `NeuroMemory` 对 `get_brain()` 的封装与 `brain.add/search/ask/get_graph` 的错误上抛（`ValueError`）合理。  
   - `pyproject.toml` 中 `py-modules` 已包含 `session_manager`、`coreference`、`consolidator`、`privacy_filter`、`health_checks`，与 CLAUDE 排错说明一致。
 

@@ -14,7 +14,7 @@
 
 ## 文档列表
 
-- [session-memory-management.md](./session-memory-management.md) - Session 记忆管理系统 (v3.0)
+- [session-memory-management.md](./session-memory-management.md) - Session 记忆管理系统
 
 ## 文档命名规范
 

@@ -1,4 +1,4 @@
-# 代码审查：Session Memory Management v3.0
+# 代码审查：Session Memory Management
 
 > **审查日期**: 2026-01-23  
 > **范围**: Session 管理、指代消解、整合器、v3 API 格式及相关修改  
@@ -42,15 +42,15 @@
 
 ---
 
-### 2. REST_API.md 仍为 v2 格式，未随 v3 更新
+### 2. REST_API.md 格式未更新
 
 **severity**: medium  
 **file**: docs/REST_API.md  
 **line**: 多处（约 97–147, 263–279, 328–346 等）
 
-**issue**: `/process` 的响应、错误示例及字段说明仍使用 v2 的 `vector_chunks`、`graph_relations`，与实现中的 v3 字段（`resolved_query`、`memories`、`relations`）不一致；且未描述 `POST /end-session`、`GET /session-status/{user_id}`。
+**issue**: `/process` 的响应、错误示例及字段说明仍使用旧的 `vector_chunks`、`graph_relations`，与实现中的字段（`resolved_query`、`memories`、`relations`）不一致；且未描述 `POST /end-session`、`GET /session-status/{user_id}`。
 
-**detail**: CLAUDE.md 要求：修改响应格式时，成功与错误两种响应以及端点的 docstring / OpenAPI 需一并更新。`http_server` 的 docstring 和错误分支已改为 v3，但 REST_API.md 未改，会导致文档与真实 API 不符。
+**detail**: CLAUDE.md 要求：修改响应格式时，成功与错误两种响应以及端点的 docstring / OpenAPI 需一并更新。`http_server` 的 docstring 和错误分支已更新，但 REST_API.md 未改，会导致文档与真实 API 不符。
 
 **suggestion**: 
 - 将 `/process` 的成功与错误示例改为 v3：`resolved_query`、`memories`、`relations`，并更新字段说明。
@@ -147,7 +147,7 @@
 | # | 问题 | 修复 |
 |---|------|------|
 | 1 | SessionManager 每次 end_session 新建 ThreadPoolExecutor | 在 `__init__` 中创建 `_consolidation_executor`，`end_session` 改为 `self._consolidation_executor.submit(...)`；顶部增加 `from concurrent.futures import ThreadPoolExecutor`，移除方法内 `import concurrent.futures` 及每次新建 Executor |
-| 2 | REST_API.md 仍为 v2 格式 | 更新为 v3：`resolved_query`、`memories`、`relations`；错误示例同步；新增 `POST /end-session`、`GET /session-status/{user_id}` 及 cURL/Python/DIFY 示例 |
+| 2 | REST_API.md 格式未更新 | 更新为当前格式：`resolved_query`、`memories`、`relations`；错误示例同步；新增 `POST /end-session`、`GET /session-status/{user_id}` 及 cURL/Python/DIFY 示例 |
 | 3 | CoreferenceResolver 固定 DeepSeek | 新增 `_create_coreference_llm()`，按 `get_chat_config()` 的 `provider` 选择 `ChatOpenAI`（DeepSeek）或 `ChatGoogleGenerativeAI`（Gemini） |
 | 4 | get_session_status 未加锁 | 对 `_sessions` 的查找与读取用 `with self._lock:` 包裹 |
 | 5 | _extract_nouns 用 set 去重丢失顺序 | 改为 `list(dict.fromkeys(nouns))`；`_extract_names` 同样改为 `list(dict.fromkeys(names))` |

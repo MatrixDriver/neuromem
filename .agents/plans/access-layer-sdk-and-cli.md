@@ -55,7 +55,7 @@
 
 - [private_brain.py](../private_brain.py) 第 418–432 行：`search(query, user_id, limit=10)`；第 432–477 行：`ask`；第 479–501 行：`add` 返回 `{status, memory_id}` 或 `{status, error}`；第 348–420 行：`get_user_graph(user_id, depth=2)`。
 - [config.py](../config.py) 第 1–50 行：`MEM0_CONFIG`、`get_chat_config`；[health_checks.py](../health_checks.py) 第 11–62 行：`check_neo4j`、`check_qdrant`、`check_llm_config`。
-- [http_server.py](../http_server.py) 第 117–145 行：`AddMemoryRequest/Response`、`AskRequest/Response` 等 Pydantic 模型与 `/api/v1` 调用方式。
+- [http_server.py](../http_server.py) 第 117–145 行：`AddMemoryRequest/Response`、`AskRequest/Response` 等 Pydantic 模型与 REST API 调用方式。
 - [pyproject.toml](../pyproject.toml) 全文：`[project]`、`[tool.setuptools]`、`packages`。
 
 ### 要创建/修改的文件

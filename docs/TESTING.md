@@ -6,7 +6,7 @@
 
 ## 概述
 
-NeuroMemory v2 提供基于 pytest 的测试套件，验证 Y 型分流架构的核心功能：
+NeuroMemory 提供基于 pytest 的测试套件，验证 Y 型分流架构的核心功能：
 
 **测试重点：**
 - 隐私过滤：PRIVATE 数据存储，PUBLIC 数据丢弃
@@ -14,7 +14,7 @@ NeuroMemory v2 提供基于 pytest 的测试套件，验证 Y 型分流架构的
 - Y 型分流：同步检索 + 异步存储决策
 - JSON 输出格式验证
 
-**v2 架构特点：**
+**架构特点：**
 - 只检索，不推理（推理交给调用方的主 LLM）
 - 不依赖网络服务，直接调用 `PrivateBrain` 核心类
 - 支持单元测试、集成测试和端到端测试
@@ -37,10 +37,40 @@ pip install -e ".[dev]"
 
 测试需要 Neo4j 和 Qdrant 服务：
 
+**重要**：在 Windows 上，必须先启动 **Docker Desktop**，然后才能运行 docker-compose 命令。
+
 ```powershell
+# 1. 启动 Docker Desktop（如果未运行）
+#    在开始菜单搜索 "Docker Desktop" 并启动
+#    等待 Docker Desktop 完全启动（系统托盘图标显示为运行中）
+
+# 2. 验证 Docker 是否可用
+docker --version
+docker ps
+
+# 3. 启动数据库服务
 docker-compose up -d
-docker-compose ps  # 确认服务状态为 running
+
+# 4. 确认服务状态为 running
+docker-compose ps
 ```
+
+**故障排除**：
+
+1. **Docker Desktop 连接错误**：
+   - 如果遇到 `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified` 错误，说明 Docker Desktop 未运行，请先启动 Docker Desktop
+   - 如果 PowerShell 会话是在 Docker Desktop 启动前打开的，可能需要关闭并重新打开 PowerShell
+
+2. **端口无法连接**：
+   - 如果 Docker Desktop 显示容器在运行，但测试仍无法连接到 `localhost:6400` 或 `localhost:17687`：
+     - 在 Docker Desktop 中查看容器日志（点击容器 → Logs 标签），检查服务是否正常启动
+     - 尝试重启容器：在 Docker Desktop 中停止并重新启动 `neuromemory` 项目
+     - 检查端口是否被占用：`netstat -ano | findstr ":6400"`
+     - 等待 10-20 秒让服务完全启动后再运行测试
+
+3. **容器状态异常**：
+   - 如果容器频繁重启或状态异常，检查 Docker Desktop 的资源设置（Settings → Resources）
+   - 确保有足够的内存和 CPU 资源分配给容器
 
 ### 3. 配置环境变量
 
@@ -57,18 +87,33 @@ GOOGLE_API_KEY=your-key-here
 
 ### 基本命令
 
+**重要**：在 Windows PowerShell 下，需要使用 `uv run pytest` 或先激活虚拟环境。
+
+**方式 1：使用 uv run（推荐）**
 ```powershell
 # 运行所有测试（默认显示完整输出）
+uv run pytest
+
+# 运行特定测试文件
+uv run pytest tests/test_cognitive.py
+
+# 运行特定测试类
+uv run pytest tests/test_cognitive.py::TestPrivacyFilter
+
+# 运行特定测试方法
+uv run pytest tests/test_cognitive.py::TestMultiHopRetrieval::test_family_relationship_retrieval
+```
+
+**方式 2：激活虚拟环境后运行**
+```powershell
+# 激活虚拟环境
+.\.venv\Scripts\Activate.ps1
+
+# 运行所有测试
 pytest
 
 # 运行特定测试文件
 pytest tests/test_cognitive.py
-
-# 运行特定测试类
-pytest tests/test_cognitive.py::TestPrivacyFilter
-
-# 运行特定测试方法
-pytest tests/test_cognitive.py::TestMultiHopRetrieval::test_family_relationship_retrieval
 ```
 
 ### 常用选项
@@ -85,11 +130,40 @@ pytest tests/test_cognitive.py::TestMultiHopRetrieval::test_family_relationship_
 
 ```powershell
 # 跳过慢速测试（只运行单元测试，不调用 LLM）
-pytest -m "not slow"
+uv run pytest -m "not slow"
 
 # 只运行慢速测试（需要 LLM 调用）
-pytest -m slow
+uv run pytest -m slow
 ```
+
+### 指定测试目标服务器
+
+通过 `--target` 参数可以指定测试目标服务器：
+
+```powershell
+# 测试本地 Docker Desktop（默认）
+uv run pytest tests/test_cognitive.py
+
+# 明确指定本地
+uv run pytest tests/test_cognitive.py --target local
+
+# 测试 ZeaBur 远程服务器
+# 配置已在 config.py 中设置默认值，无需设置环境变量
+uv run pytest tests/test_cognitive.py --target zeabur
+```
+
+**说明**：
+- `--target local`：使用本地 Docker Desktop 中的数据库（localhost）
+- `--target zeabur`：使用 ZeaBur 远程服务器中的数据库
+- 默认值为 `local`，如果不指定参数则测试本地环境
+
+**ZeaBur 远程测试配置**：
+- ZeaBur 测试配置在 `config.py` 中的 `ZEABUR_TEST_CONFIG` 中设置，包含默认值：
+  - `base_url`: `https://neuromemory.zeabur.app`
+  - `neo4j_host`: `neo4j-neuromemory` (ZeaBur 内部服务名称)
+  - `qdrant_host`: `qdrant-neuromemory` (ZeaBur 内部服务名称)
+  - `neo4j_password`: `zeabur2025`
+- 这些默认值很少修改，如需临时覆盖，可通过环境变量设置（如 `$env:ZEABUR_NEO4J_HOST="..."`）
 
 ---
 
@@ -98,7 +172,7 @@ pytest -m slow
 ```
 tests/
 ├── __init__.py
-└── test_cognitive.py      # v2 认知流程测试
+└── test_cognitive.py      # 认知流程测试
 ```
 
 ### 测试类说明
@@ -139,7 +213,7 @@ tests/test_cognitive.py::TestPronounResolution::test_no_identity_no_resolution P
 ### 隐私过滤测试
 
 ```powershell
-pytest tests/test_cognitive.py::TestPrivacyFilter -v -s
+uv run pytest tests/test_cognitive.py::TestPrivacyFilter -v -s
 ```
 
 预期输出：
@@ -161,7 +235,7 @@ pytest tests/test_cognitive.py::TestPrivacyFilter -v -s
 ### Y 型分流测试
 
 ```powershell
-pytest tests/test_cognitive.py::TestYSplitFlow::test_private_data_stored -v -s
+uv run pytest tests/test_cognitive.py::TestYSplitFlow::test_private_data_stored -v -s
 ```
 
 预期输出（调试模式）：
@@ -198,7 +272,7 @@ pytest tests/test_cognitive.py::TestYSplitFlow::test_private_data_stored -v -s
 ### 多跳检索测试
 
 ```powershell
-pytest tests/test_cognitive.py::TestMultiHopRetrieval::test_family_relationship_retrieval -v -s
+uv run pytest tests/test_cognitive.py::TestMultiHopRetrieval::test_family_relationship_retrieval -v -s
 ```
 
 预期输出：
@@ -244,7 +318,7 @@ pytest tests/test_cognitive.py::TestMultiHopRetrieval::test_family_relationship_
 也可以直接运行测试文件（不通过 pytest 命令）：
 
 ```powershell
-python tests/test_cognitive.py
+uv run python tests/test_cognitive.py
 ```
 
 ---
@@ -293,18 +367,18 @@ class TestMultiHopRetrieval:
         # 检索
         result = brain.search("查询", unique_user_id)
         
-        # 验证（v3 格式：memories、relations）
+        # 验证（memories、relations）
         assert result["metadata"]["has_memory"]
         assert len(result.get("memories", [])) > 0
 ```
 
 ---
 
-## v2 架构关键点
+## 架构关键点
 
 ### 只检索，不推理
 
-v2/v3 中 NeuroMemory 只负责检索，返回结构化 JSON（v3 格式）：
+NeuroMemory 只负责检索，返回结构化 JSON：
 
 ```json
 {
@@ -334,12 +408,41 @@ v2/v3 中 NeuroMemory 只负责检索，返回结构化 JSON（v3 格式）：
 
 ## 故障排除
 
-### 问题：测试连接数据库失败
+### 问题：找不到 pytest 命令
 
 ```powershell
-确保 Docker 服务正在运行：
+# 错误：pytest: 无法识别命令
+# 解决：使用 uv run pytest 或先激活虚拟环境
+
+# 方式 1：使用 uv run（推荐）
+uv run pytest tests/test_cognitive.py
+
+# 方式 2：激活虚拟环境
+.\.venv\Scripts\Activate.ps1
+pytest tests/test_cognitive.py
+```
+
+### 问题：测试连接数据库失败
+
+**本地测试**：
+```powershell
+# 确保 Docker 服务正在运行
 docker-compose ps
 docker-compose up -d
+
+# 确认使用 --target local（默认）
+uv run pytest tests/test_cognitive.py --target local
+```
+
+**远程测试**：
+```powershell
+# 使用 --target zeabur，配置已在 config.py 中设置默认值
+uv run pytest tests/test_cognitive.py --target zeabur
+
+# 如需临时覆盖默认配置，可通过环境变量设置
+$env:ZEABUR_NEO4J_HOST="custom-neo4j-host"
+$env:ZEABUR_QDRANT_HOST="custom-qdrant-host"
+uv run pytest tests/test_cognitive.py --target zeabur
 ```
 
 ### 问题：LLM API 调用失败
@@ -353,7 +456,7 @@ docker-compose up -d
 
 ```powershell
 # 确保使用 -s 参数
-pytest -s
+uv run pytest -s
 
 # 或检查 pyproject.toml 中的 pytest 配置
 ```

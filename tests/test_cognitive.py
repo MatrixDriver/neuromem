@@ -1,5 +1,5 @@
 """
-NeuroMemory v2 测试套件
+NeuroMemory 测试套件
 
 基于 PrivateBrain 的 Y 型分流架构测试：
 - 隐私过滤功能测试
@@ -23,8 +23,31 @@ NeuroMemory v2 测试套件
 
 import pytest
 import time
+import socket
 
 from config import LLM_PROVIDER, EMBEDDING_PROVIDER
+
+
+# =============================================================================
+# 工具函数
+# =============================================================================
+
+def check_database_available(host=None, port=6400, timeout=1):
+    """检查数据库服务是否可用"""
+    # 如果没有指定 host，从配置中读取
+    if host is None:
+        import config
+        host = config.MEM0_CONFIG.get("vector_store", {}).get("config", {}).get("host", "localhost")
+        port = config.MEM0_CONFIG.get("vector_store", {}).get("config", {}).get("port", 6400)
+    
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
 
 
 # =============================================================================
@@ -41,11 +64,29 @@ def brain():
     import openai.resources.chat  # noqa: F401
     import openai.resources.embeddings  # noqa: F401
     
+    # 确保使用最新的配置（conftest.py 中的 target_env 已重新加载 config）
+    import importlib
+    import config
+    importlib.reload(config)
+    
     from private_brain import PrivateBrain
     
+    # 显示当前数据库配置
+    from config import MEM0_CONFIG
+    qdrant_host = MEM0_CONFIG.get("vector_store", {}).get("config", {}).get("host", "unknown")
+    qdrant_port = MEM0_CONFIG.get("vector_store", {}).get("config", {}).get("port", "unknown")
+    neo4j_url = "未启用"
+    if "graph_store" in MEM0_CONFIG:
+        neo4j_url = MEM0_CONFIG["graph_store"].get("config", {}).get("url", "unknown")
+    
+    # 检查数据库是否可用（使用配置中的 host）
+    if not check_database_available():
+        pytest.skip(f"Qdrant 数据库未运行 ({qdrant_host}:{qdrant_port})，请先启动: docker-compose up -d")
+    
     print("\n" + "=" * 60)
-    print("初始化 PrivateBrain (v2 架构)...")
+    print("初始化 PrivateBrain...")
     print(f"当前配置: LLM={LLM_PROVIDER}, Embedding={EMBEDDING_PROVIDER}")
+    print(f"数据库: Qdrant={qdrant_host}:{qdrant_port}, Neo4j={neo4j_url}")
     print("=" * 60)
     
     brain_instance = PrivateBrain()
@@ -234,7 +275,7 @@ class TestPrivateBrain:
         
         result = brain.process("测试查询", unique_user_id)
         
-        # 验证必要字段存在（v3 格式: memories / relations）
+        # 验证必要字段存在（memories / relations）
         assert "status" in result
         assert "memories" in result
         assert "relations" in result
@@ -344,7 +385,7 @@ class TestYSplitFlow:
         print(f"\n>>> 搜索查询: {search_query}")
         print(f">>> 搜索结果: {search_result}")
         
-        # 应该有记忆（v3 格式: memories）
+        # 应该有记忆（memories）
         has_memory = search_result["metadata"]["has_memory"]
         has_chunks = len(search_result["memories"]) > 0
         
@@ -457,7 +498,7 @@ class TestMultiHopRetrieval:
         print(f"  - 向量记忆数: {len(result['memories'])}")
         print(f"  - 图谱关系数: {len(result['relations'])}")
         
-        # 打印向量记忆（v3: memories，字段 content）
+        # 打印向量记忆（memories，字段 content）
         if result['memories']:
             print("\n  向量记忆:")
             for chunk in result['memories']:
@@ -465,7 +506,7 @@ class TestMultiHopRetrieval:
                 score = chunk.get("score", 0)
                 print(f"    - {text} (score: {score:.2f})")
         
-        # 打印图谱关系（v3: relations，字段 relation）
+        # 打印图谱关系（relations，字段 relation）
         if result['relations']:
             print("\n  图谱关系:")
             for rel in result['relations']:
@@ -475,7 +516,7 @@ class TestMultiHopRetrieval:
         # 验证检索到了相关信息
         assert result["metadata"]["has_memory"], "应该检索到相关记忆"
         
-        # 验证检索结果中包含关键信息（v3: memories / content）
+        # 验证检索结果中包含关键信息（memories / content）
         all_text = " ".join([
             chunk.get("content", chunk.get("memory", ""))
             for chunk in result["memories"]
