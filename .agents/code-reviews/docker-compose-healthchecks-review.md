@@ -19,8 +19,8 @@
 ## 变更概要
 
 - **Neo4j healthcheck**：`wget --no-verbose --tries=1 --spider localhost:7474` → `curl -f http://localhost:7474`
-- **Qdrant ports**：`6333:6333` → `6400:6333`（宿主机 6400 避免 Windows 保留端口 6296–6395）
-- **Qdrant healthcheck**：新增 `curl -f http://localhost:6333/`，并设置 `interval: 10s`、`timeout: 5s`、`retries: 5`
+- **Qdrant ports**：统一使用 `6400:6400`（容器内外均为 6400）
+- **Qdrant 环境变量**：新增 `QDRANT__SERVICE__HTTP_PORT=6400` 让 Qdrant 监听 6400
 
 ---
 
@@ -33,7 +33,7 @@
 **line:** 31
 
 **issue:**  
-健康检查命令为 `curl -f http://localhost:6333/ || exit 1`。`qdrant/qdrant` 官方镜像的 [Dockerfile](https://github.com/qdrant/qdrant/blob/master/Dockerfile) 基于 `debian:13-slim`，仅安装 `ca-certificates`、`tzdata`、`libunwind8` 及可选 `$PACKAGES`，**未安装 `curl`**。容器内执行 `curl` 会报错（如 `curl: not found`），healthcheck 会一直失败，容器被标为 `unhealthy`。
+健康检查命令为 `curl -f http://localhost:6400/ || exit 1`。`qdrant/qdrant` 官方镜像的 [Dockerfile](https://github.com/qdrant/qdrant/blob/master/Dockerfile) 基于 `debian:13-slim`，仅安装 `ca-certificates`、`tzdata`、`libunwind8` 及可选 `$PACKAGES`，**未安装 `curl`**。容器内执行 `curl` 会报错（如 `curl: not found`），healthcheck 会一直失败，容器被标为 `unhealthy`。
 
 **detail:**  
 - 健康检查在**容器内**执行，需使用该镜像内存在的命令。  
@@ -50,8 +50,8 @@
 
 2. **方案 B：使用自定义镜像**  
    编写 Dockerfile：`FROM qdrant/qdrant:latest`，然后  
-   `RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*`，构建并推送到自有仓库；在 `docker-compose.yml` 中将 `image: qdrant/qdrant:latest` 改为该镜像，健康检查可继续使用  
-   `curl -f http://localhost:6333/ || exit 1`。
+   `RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*`，构建并推送到自有仓库；在 `docker-compose.yml` 中将 `image: qdrant/qdrant:latest` 改为该镜像，健康检查可继续使用
+   `curl -f http://localhost:6400/ || exit 1`。
 
 ---
 
@@ -78,8 +78,8 @@ Neo4j 官方镜像多基于完整版 Linux，不少版本会带 `curl`，但未�
 
 ## 未发现问题的部分
 
-- **Qdrant `localhost:6333`**：健康检查在容器内执行，Qdrant 在容器内监听 6333，使用 `http://localhost:6333/` 正确。
-- **端口 `6400:6333`**：宿主机 6400、容器 6333 与 `config` 及文档中对 6400 的约定一致；注释中关于 Windows 保留端口的说明清晰。
+- **Qdrant `localhost:6400`**：健康检查在容器内执行，Qdrant 通过 `QDRANT__SERVICE__HTTP_PORT=6400` 配置在容器内监听 6400，使用 `http://localhost:6400/` 正确。
+- **端口 `6400:6400`**：宿主机与容器统一使用 6400，与 `config` 及文档中的配置一致。
 - **`interval` / `timeout` / `retries`**：与 Neo4j 一致（10s / 5s / 5），无逻辑问题。
 - **Neo4j `curl -f http://localhost:7474`**：在 `curl` 存在的前提下，用法正确；`-f` 对 4xx/5xx 的处置符合“不可用即失败”的语义。
 

@@ -276,7 +276,7 @@ MEM0_CONFIG = {
         "provider": "qdrant",
         "config": {
             "host": "localhost",
-            "port": 6400,  # 使用 6400 避免 Windows 保留端口冲突（6333 在保留范围 6296-6395 内）
+            "port": 6400,  # 统一使用 6400 端口
             "collection_name": "neuro_memory_openai_1024",  # 自动生成
             "embedding_model_dims": 1024,  # 明确指定向量维度
         }

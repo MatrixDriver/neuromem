@@ -108,7 +108,7 @@ SILICONFLOW_EMBEDDING_CONFIG = {
     "provider": "qdrant",
     "config": {
         "host": "localhost",
-        "port": 6400,  # 使用 6400 避免 Windows 保留端口冲突（6333 在保留范围 6296-6395 内）
+        "port": 6400,  # 统一使用 6400 端口
         "collection_name": "neuro_memory_huggingface_384",  # 自动生成
     },
 }
@@ -152,8 +152,10 @@ services:
 
   qdrant:
     image: qdrant/qdrant:latest
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6400
     ports:
-      - "6400:6333"   # REST API + Dashboard（使用 6400 避免 Windows 保留端口冲突，6333 在保留范围 6296-6395 内）
+      - "6400:6400"   # REST API + Dashboard（统一使用 6400 端口）
 ```
 
 ---
