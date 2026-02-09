@@ -1,6 +1,6 @@
 """Search and memory API endpoints."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.app.api.v1.schemas import (
@@ -25,20 +25,51 @@ async def search(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Semantic search for memories using vector similarity."""
-    results = await search_memories(
-        db,
-        auth.tenant_id,
-        body.user_id,
-        body.query,
-        body.limit,
-        body.memory_type,
-    )
-    return SearchResponse(
-        user_id=body.user_id,
-        query=body.query,
-        results=[SearchResult(**r) for r in results],
-    )
+    """
+    Semantic search for memories using vector similarity.
+
+    Converts the query to an embedding and searches for similar memories
+    using cosine similarity on vector embeddings.
+
+    Args:
+        body: Search request with query, user_id, and optional filters
+        auth: Authentication context (injected)
+        db: Database session (injected)
+
+    Returns:
+        SearchResponse: List of matching memories with similarity scores
+
+    Raises:
+        HTTPException 401: Invalid or missing API key
+        HTTPException 500: Embedding service error or database error
+    """
+    try:
+        results = await search_memories(
+            db,
+            auth.tenant_id,
+            body.user_id,
+            body.query,
+            body.limit,
+            body.memory_type,
+        )
+        logger.info(
+            f"Search completed: {len(results)} results",
+            extra={"user_id": body.user_id, "query": body.query[:50]}
+        )
+        return SearchResponse(
+            user_id=body.user_id,
+            query=body.query,
+            results=[SearchResult(**r) for r in results],
+        )
+    except Exception as e:
+        logger.error(
+            f"Search failed: {str(e)}",
+            extra={"user_id": body.user_id, "query": body.query[:50]}
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Search failed: {str(e)}"
+        )
 
 
 @router.post("/memories", response_model=MemoryResponse)
@@ -47,20 +78,55 @@ async def add_mem(
     auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
-    """Add a memory with automatic embedding generation."""
-    record = await add_memory(
-        db,
-        auth.tenant_id,
-        body.user_id,
-        body.content,
-        body.memory_type,
-        body.metadata,
-    )
-    return MemoryResponse(
-        id=str(record.id),
-        user_id=body.user_id,
-        content=record.content,
-        memory_type=record.memory_type,
-        metadata=record.metadata_,
-        created_at=record.created_at,
-    )
+    """
+    Add a memory with automatic embedding generation.
+
+    Generates a vector embedding for the content and stores it for
+    semantic search.
+
+    Args:
+        body: Memory content and optional metadata
+        auth: Authentication context (injected)
+        db: Database session (injected)
+
+    Returns:
+        MemoryResponse: The created memory record
+
+    Raises:
+        HTTPException 401: Invalid or missing API key
+        HTTPException 500: Embedding service error or database error
+    """
+    try:
+        record = await add_memory(
+            db,
+            auth.tenant_id,
+            body.user_id,
+            body.content,
+            body.memory_type,
+            body.metadata,
+        )
+        logger.info(
+            "Memory added",
+            extra={
+                "user_id": body.user_id,
+                "content_length": len(body.content),
+                "memory_type": body.memory_type
+            }
+        )
+        return MemoryResponse(
+            id=str(record.id),
+            user_id=body.user_id,
+            content=record.content,
+            memory_type=record.memory_type,
+            metadata=record.metadata_,
+            created_at=record.created_at,
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to add memory: {str(e)}",
+            extra={"user_id": body.user_id, "content_length": len(body.content)}
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to add memory: {str(e)}"
+        )

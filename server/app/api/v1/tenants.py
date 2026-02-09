@@ -17,32 +17,52 @@ async def register_tenant(
     body: TenantRegister,
     db: AsyncSession = Depends(get_db),
 ):
-    """Register a new tenant and get an API key."""
+    """
+    Register a new tenant and get an API key.
+
+    Returns:
+        TenantRegisterResponse: Tenant ID, API key, and warning message
+
+    Raises:
+        HTTPException 409: Email already registered
+        HTTPException 500: Database error
+    """
     # Check if email already exists
     existing = await db.execute(
         select(Tenant).where(Tenant.email == body.email)
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Email already registered")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Email '{body.email}' is already registered"
+        )
 
-    # Create tenant
-    tenant = Tenant(name=body.name, email=body.email)
-    db.add(tenant)
-    await db.flush()
+    try:
+        # Create tenant
+        tenant = Tenant(name=body.name, email=body.email)
+        db.add(tenant)
+        await db.flush()
 
-    # Create API key
-    raw_key = generate_api_key()
-    api_key = ApiKey(
-        tenant_id=tenant.id,
-        key_hash=hash_api_key(raw_key),
-        key_prefix=raw_key[:8],
-        name="default",
-        permissions="read,write,admin",
-    )
-    db.add(api_key)
+        # Create API key
+        raw_key = generate_api_key()
+        api_key = ApiKey(
+            tenant_id=tenant.id,
+            key_hash=hash_api_key(raw_key),
+            key_prefix=raw_key[:8],
+            name="default",
+            permissions="read,write,admin",
+        )
+        db.add(api_key)
+        await db.commit()
 
-    return TenantRegisterResponse(
-        tenant_id=str(tenant.id),
-        api_key=raw_key,
-        message="Save your API key - it won't be shown again.",
-    )
+        return TenantRegisterResponse(
+            tenant_id=str(tenant.id),
+            api_key=raw_key,
+            message="Save your API key - it won't be shown again.",
+        )
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to register tenant: {str(e)}"
+        )
