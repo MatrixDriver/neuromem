@@ -1,384 +1,327 @@
-# NeuroMemory v2
+# NeuroMemory
 
-**Memory-as-a-Service Platform**
+**AI Agent 记忆框架**
 
-为 AI agent 开发者提供记忆管理服务。通过 Python SDK 和 REST API，轻松为您的 AI 应用添加记忆能力。
+为 AI agent 开发者提供记忆管理能力。直接在 Python 程序中使用，无需部署服务器。
 
 ---
 
-## ⚡ 快速开始
+## 快速开始
 
 ```bash
-# 1. 启动服务
-docker compose -f docker-compose.v2.yml up -d
+# 1. 启动 PostgreSQL
+docker compose -f docker-compose.v2.yml up -d db
 
-# 2. 访问 API 文档
-open http://localhost:8765/docs
-
-# 3. 注册租户获取 API Key
-curl -X POST http://localhost:8765/v1/tenants/register \
-  -H "Content-Type: application/json" \
-  -d '{"name": "MyCompany", "email": "admin@example.com"}'
-
-# 4. 使用 Python SDK
-pip install -e sdk/
+# 2. 安装
+pip install -e ".[all]"
 ```
 
 ```python
-from neuromemory_client import NeuroMemoryClient
+import asyncio
+from neuromemory import NeuroMemory, SiliconFlowEmbedding
 
-client = NeuroMemoryClient(api_key="nm_xxx")
+async def main():
+    async with NeuroMemory(
+        database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
+        embedding=SiliconFlowEmbedding(api_key="your-key"),
+    ) as nm:
+        # 添加记忆
+        await nm.add_memory(
+            user_id="alice",
+            content="I work at ABC Company as a software engineer",
+            memory_type="fact",
+        )
 
-# 添加记忆
-client.add_memory(
-    user_id="alice",
-    content="I work at ABC Company as a software engineer",
-    memory_type="fact"
-)
+        # 语义检索
+        results = await nm.search(user_id="alice", query="Where does Alice work?")
+        for r in results:
+            print(f"[{r['similarity']:.2f}] {r['content']}")
 
-# 语义检索
-results = client.search(
-    user_id="alice",
-    query="Where does Alice work?",
-    limit=5
-)
-
-for result in results:
-    print(f"[{result['similarity']:.2f}] {result['content']}")
+asyncio.run(main())
 ```
 
-**完整指南**: [docs/v2/GETTING_STARTED.md](docs/v2/GETTING_STARTED.md) ⭐
+**完整指南**: [docs/v2/GETTING_STARTED.md](docs/v2/GETTING_STARTED.md)
 
 ---
 
-## 🎯 核心特性
+## 核心特性
 
-### 🗄️ 统一存储架构
-- **PostgreSQL 16 + pgvector**: 结构化数据 + 向量检索统一存储
-- **简化部署**: 从 v1 的 3 个服务（Neo4j + Qdrant + API）简化为 2 个服务
-- **ACID 事务**: 保证数据一致性，告别跨库事务难题
+### 六大功能模块
 
-### 🔐 多租户隔离
-- **API Key 认证**: SHA-256 哈希存储，安全可靠
-- **数据隔离**: 按 `tenant_id` 严格隔离，支持 SaaS 模式
-- **用户管理**: 每个租户可管理多个用户的记忆
+| 模块 | 入口 | 功能 |
+|------|------|------|
+| **语义记忆** | `nm.add_memory()` / `nm.search()` | 存储文本并自动生成 embedding，向量相似度检索 |
+| **KV 存储** | `nm.kv` | 通用键值存储（偏好、配置），namespace + scope 隔离 |
+| **对话管理** | `nm.conversations` | 会话消息存储、批量导入、会话列表 |
+| **文件管理** | `nm.files` | 文件上传到 S3/MinIO，自动提取文本并生成 embedding |
+| **图数据库** | `nm.graph` | 基于 Apache AGE 的知识图谱，节点/边 CRUD、路径查找 |
+| **记忆提取** | `nm.extract_memories()` | 用 LLM 从对话中自动提取偏好、事实、事件 |
 
-### 🚀 高性能设计
-- **异步架构**: FastAPI + SQLAlchemy 2.0 async + asyncpg
-- **向量索引**: HNSW 索引，向量检索性能接近专用 VectorDB
-- **时序优化**: BRIN 索引，时间范围查询节省 99% 空间
+### 可插拔 Provider
 
-### 🐍 易于集成
-- **Python SDK**: 基于 httpx 的同步客户端，简洁易用
-- **REST API**: OpenAPI 3.0 规范，自动生成交互式文档
-- **类型安全**: Pydantic 模型定义，完整的类型提示
+```
+EmbeddingProvider (ABC)
+├── SiliconFlowEmbedding   # BAAI/bge-m3, 1024 维
+└── OpenAIEmbedding        # text-embedding-3-small, 1536 维
+
+LLMProvider (ABC)
+└── OpenAILLM              # 兼容 OpenAI / DeepSeek
+
+ObjectStorage (ABC)
+└── S3Storage              # 兼容 MinIO / AWS S3 / 华为云 OBS
+```
+
+### 统一存储
+
+- **PostgreSQL 16 + pgvector**: 结构化数据 + 向量检索
+- **Apache AGE**: 图数据库（Cypher 查询）
+- **ACID 事务**: 数据一致性保证
+
+### 异步优先
+
+- 全链路 async/await（SQLAlchemy 2.0 + asyncpg）
+- 上下文管理器自动管理连接生命周期
 
 ---
 
-## 📚 完整文档
-
-### 核心文档
+## 文档
 
 | 文档 | 说明 |
 |------|------|
 | **[快速开始](docs/v2/GETTING_STARTED.md)** | 10 分钟上手指南 |
-| **[架构设计](docs/v2/ARCHITECTURE.md)** | 系统架构、技术栈、设计原则 |
-| **[API 参考](docs/v2/API_REFERENCE.md)** | 完整的 REST API 端点文档 |
-| **[SDK 指南](docs/v2/SDK_GUIDE.md)** | Python SDK 详细用法 |
+| **[架构设计](docs/v2/ARCHITECTURE.md)** | 系统架构、Provider 模式、数据模型 |
+| **[使用指南](docs/v2/SDK_GUIDE.md)** | 完整 API 用法和代码示例 |
 | **[CLAUDE.md](CLAUDE.md)** | Claude Code 工作指南 |
-
-### 在线文档
-
-- **Swagger UI**: http://localhost:8765/docs
-- **ReDoc**: http://localhost:8765/redoc
-- **文档中心**: [docs/v2/README.md](docs/v2/README.md)
 
 ---
 
-## 🏗️ 架构概览
+## 架构概览
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    NeuroMemory v2 架构                        │
+│                   NeuroMemory 架构                           │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │         客户端层 (Client Layer)                       │  │
-│  │  • Python SDK (httpx)                                │  │
-│  │  • REST API (HTTP/JSON)                              │  │
-│  │  • CLI Tool (Typer)                                  │  │
+│  │         应用层 (Your Agent Code)                      │  │
+│  │  from neuromemory import NeuroMemory                  │  │
+│  │  nm = NeuroMemory(database_url=..., embedding=...)    │  │
 │  └──────────────────────┬───────────────────────────────┘  │
 │                         │                                   │
 │  ┌──────────────────────▼───────────────────────────────┐  │
-│  │         API 服务层 (FastAPI)                          │  │
-│  │  • API Key 认证中间件                                 │  │
-│  │  • /v1/tenants - 租户管理                            │  │
-│  │  • /v1/preferences - 偏好 CRUD                       │  │
-│  │  • /v1/memories - 记忆添加                           │  │
-│  │  • /v1/search - 语义检索                             │  │
-│  │  • /v1/memories/time-range - 时间查询                │  │
+│  │         门面层 (Facade Layer)                         │  │
+│  │  nm.kv  nm.conversations  nm.files  nm.graph         │  │
 │  └──────────────────────┬───────────────────────────────┘  │
 │                         │                                   │
 │  ┌──────────────────────▼───────────────────────────────┐  │
 │  │         服务层 (Service Layer)                        │  │
-│  │  • AuthService - 认证和租户隔离                       │  │
-│  │  • MemoryService - 时间查询和 CRUD                    │  │
-│  │  • SearchService - 向量检索和 embedding              │  │
-│  │  • PreferencesService - 偏好管理                     │  │
+│  │  SearchService │ KVService │ ConversationService      │  │
+│  │  FileService │ GraphService │ MemoryExtractionService │  │
 │  └──────────────────────┬───────────────────────────────┘  │
 │                         │                                   │
 │  ┌──────────────────────▼───────────────────────────────┐  │
-│  │         ORM 层 (SQLAlchemy 2.0 Async)                │  │
-│  │  • Tenant, ApiKey, Preference, Embedding             │  │
-│  │  • TimestampMixin (created_at, updated_at)           │  │
+│  │    Provider 层 (可插拔)                               │  │
+│  │  EmbeddingProvider │ LLMProvider │ ObjectStorage      │  │
 │  └──────────────────────┬───────────────────────────────┘  │
 │                         │                                   │
 │  ┌──────────────────────▼───────────────────────────────┐  │
-│  │    存储层 (PostgreSQL 16 + pgvector)                  │  │
-│  │  • 结构化数据 (租户、偏好、元数据)                     │  │
-│  │  • 向量数据 (1024 维 embedding, cosine 距离)         │  │
-│  │  • HNSW 向量索引 + BRIN 时序索引                      │  │
-│  └──────────────────────┬───────────────────────────────┘  │
-│                         │                                   │
-│  ┌──────────────────────▼───────────────────────────────┐  │
-│  │    外部服务 (SiliconFlow Embedding API)               │  │
-│  │  • 模型: BAAI/bge-m3                                  │  │
-│  │  • 维度: 1024                                         │  │
+│  │    存储层                                             │  │
+│  │  PostgreSQL + pgvector + AGE │ MinIO/S3 (可选)       │  │
 │  └─────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🛠️ 技术栈
+## 技术栈
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
-| **API 框架** | FastAPI | 高性能异步 Web 框架 |
-| **数据库** | PostgreSQL 16 | 统一存储后端 |
-| **向量扩展** | pgvector | PostgreSQL 向量插件 |
-| **ORM** | SQLAlchemy 2.0 | 异步 ORM，asyncpg 驱动 |
-| **Schema** | Pydantic | 请求/响应模型定义 |
-| **SDK** | httpx | Python 同步 HTTP 客户端 |
-| **Embedding** | SiliconFlow | BAAI/bge-m3 (1024 维) |
-| **容器化** | Docker | 服务打包和部署 |
+| **Framework** | Python 3.10+ async | 直接嵌入 agent 程序 |
+| **数据库** | PostgreSQL 16 + pgvector | 向量检索 + 结构化存储 |
+| **图数据库** | Apache AGE | Cypher 查询语言 |
+| **ORM** | SQLAlchemy 2.0 (async) | asyncpg 驱动 |
+| **Embedding** | 可插拔 Provider | SiliconFlow / OpenAI |
+| **LLM** | 可插拔 Provider | OpenAI / DeepSeek |
+| **文件存储** | S3 兼容 | MinIO / AWS S3 / 华为云 OBS |
 
 ---
 
-## 📦 安装
+## 安装
 
 ### 环境要求
 
 - **Python**: 3.10+
-- **Docker**: 20.0+
-- **内存**: 至少 4GB RAM
+- **Docker**: 20.0+（用于 PostgreSQL）
 
-### Docker Compose（推荐）
+### 安装步骤
 
 ```bash
 # 克隆项目
 git clone https://github.com/your-repo/NeuroMemory.git
 cd NeuroMemory
 
-# 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，添加 SILICONFLOW_API_KEY
-
-# 启动服务
-docker compose -f docker-compose.v2.yml up -d
-
-# 查看日志
-docker compose -f docker-compose.v2.yml logs -f api
-
-# 健康检查
-curl http://localhost:8765/v1/health
-```
-
-### 本地开发
-
-```bash
-# 1. 启动数据库
+# 启动 PostgreSQL（含 pgvector + AGE）
 docker compose -f docker-compose.v2.yml up -d db
 
-# 2. 创建虚拟环境
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows
+# 安装（含所有可选依赖）
+pip install -e ".[all]"
 
-# 3. 安装依赖
-pip install -r requirements.txt
-pip install -e sdk/
+# 或只安装核心依赖
+pip install -e .
+```
 
-# 4. 初始化数据库
-python -m server.app.db.init_db
+### 可选依赖
 
-# 5. 启动 API 服务
-uvicorn server.app.main:app --reload --host 0.0.0.0 --port 8765
+```bash
+pip install -e ".[s3]"     # S3/MinIO 文件存储
+pip install -e ".[pdf]"    # PDF 文本提取
+pip install -e ".[docx]"   # Word 文本提取
+pip install -e ".[dev]"    # 开发和测试工具
+pip install -e ".[all]"    # 全部依赖
 ```
 
 详见 [快速开始指南](docs/v2/GETTING_STARTED.md)
 
 ---
 
-## 🎯 使用示例
+## 使用示例
 
-### 偏好管理
-
-```python
-# 设置用户偏好
-client.preferences.set(
-    user_id="alice",
-    key="language",
-    value="zh-CN"
-)
-
-# 获取偏好
-pref = client.preferences.get(user_id="alice", key="language")
-print(pref["value"])  # "zh-CN"
-```
-
-### 记忆管理
+### KV 存储
 
 ```python
-# 添加事实性记忆
-client.add_memory(
-    user_id="alice",
-    content="I work at ABC Company as a software engineer",
-    memory_type="fact"
-)
+# 存储用户偏好
+await nm.kv.set("preferences", "alice", "language", "zh-CN")
+await nm.kv.set("preferences", "alice", "theme", {"mode": "dark"})
 
-# 添加事件记忆
-client.add_memory(
-    user_id="alice",
-    content="Attended team meeting on project planning",
-    memory_type="episodic",
-    metadata={"date": "2026-02-10", "participants": ["bob", "charlie"]}
-)
+# 读取
+value = await nm.kv.get("preferences", "alice", "language")
+
+# 列出
+items = await nm.kv.list("preferences", "alice")
 ```
 
-### 语义检索
+### 对话管理
 
 ```python
-# 基础检索
-results = client.search(
-    user_id="alice",
-    query="Where does Alice work?",
-    limit=5
+# 添加消息
+msg = await nm.conversations.add_message(
+    user_id="alice", role="user", content="Hello!"
 )
 
-# 带时间过滤
-from datetime import datetime, timezone
-
-results = client.search(
+# 批量添加
+session_id, ids = await nm.conversations.add_messages_batch(
     user_id="alice",
-    query="meetings",
-    memory_type="episodic",
-    created_after=datetime(2026, 1, 1, tzinfo=timezone.utc),
-    limit=10
+    messages=[
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": "Hello!"},
+    ],
 )
+
+# 获取历史
+messages = await nm.conversations.get_history(user_id="alice", session_id=session_id)
 ```
 
-### 时间查询
+### 文件管理
 
 ```python
-from datetime import datetime, date, timezone
+from neuromemory import S3Storage
 
-# 时间范围查询
-result = client.memory.get_by_time_range(
-    user_id="alice",
-    start_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
-    end_time=datetime(2026, 1, 31, 23, 59, 59, tzinfo=timezone.utc),
-    limit=50
+nm = NeuroMemory(
+    database_url="...",
+    embedding=SiliconFlowEmbedding(api_key="..."),
+    storage=S3Storage(
+        endpoint="http://localhost:9000",
+        access_key="neuromemory",
+        secret_key="neuromemory123",
+        bucket="neuromemory",
+    ),
 )
 
-# 最近记忆
-memories = client.get_recent_memories(
+# 上传文件（自动提取文本、生成 embedding）
+doc = await nm.files.upload(
     user_id="alice",
-    days=7,
-    limit=50
+    filename="report.pdf",
+    file_data=open("report.pdf", "rb").read(),
+    category="work",
+    auto_extract=True,
 )
 
-# 时间线统计
-timeline = client.get_memory_timeline(
-    user_id="alice",
-    start_date=date(2026, 1, 1),
-    end_date=date(2026, 1, 31),
-    granularity="day"  # day, week, month
-)
+# 列出文件
+docs = await nm.files.list_documents(user_id="alice", category="work")
 ```
 
-更多示例见 [SDK 指南](docs/v2/SDK_GUIDE.md)
+### 图数据库
+
+```python
+from neuromemory.models.graph import NodeType, EdgeType
+
+# 创建节点
+await nm.graph.create_node(NodeType.USER, "alice", properties={"name": "Alice"})
+await nm.graph.create_node(NodeType.TOPIC, "python", properties={"name": "Python"})
+
+# 创建关系
+await nm.graph.create_edge(
+    NodeType.USER, "alice",
+    EdgeType.INTERESTED_IN,
+    NodeType.TOPIC, "python",
+)
+
+# 查询邻居
+neighbors = await nm.graph.get_neighbors(NodeType.USER, "alice")
+```
+
+### 记忆提取（需要 LLM）
+
+```python
+from neuromemory import OpenAILLM
+
+nm = NeuroMemory(
+    database_url="...",
+    embedding=SiliconFlowEmbedding(api_key="..."),
+    llm=OpenAILLM(api_key="...", model="deepseek-chat"),
+)
+
+# 从对话中自动提取记忆
+stats = await nm.extract_memories(user_id="alice", session_id="session_001")
+print(f"提取了 {stats['facts_extracted']} 条事实")
+```
+
+更多示例见 [使用指南](docs/v2/SDK_GUIDE.md)
 
 ---
 
-## 🆚 v1 vs v2 对比
+## 路线图
 
-| 特性 | v1 (已弃用) | v2 (当前版本) |
-|------|-------------|---------------|
-| **向量存储** | Qdrant | PostgreSQL + pgvector |
-| **图存储** | Neo4j | 移除（未来考虑 AGE 扩展） |
-| **认证** | 无 | API Key 多租户认证 |
-| **部署复杂度** | 3 个服务 | 2 个服务（简化 33%） |
-| **LLM 集成** | Mem0 内置 | 客户端自行集成 |
-| **事务支持** | 跨库困难 | 原生 ACID 事务 |
-| **运维成本** | 高（3 套监控） | 低（单一数据库） |
-| **学习曲线** | 陡峭（Cypher + Qdrant） | 平缓（标准 SQL） |
-
-### 迁移建议
-
-**如果你依赖 v1 的知识图谱功能**:
-- 保留 v1 部署，或等待 v2 的 AGE 图数据库支持（Phase 2 计划中）
-
-**如果你只使用向量检索**:
-- 可以迁移到 v2，性能更好，部署更简单
-
-详见 [架构文档 - v1 迁移说明](docs/v2/ARCHITECTURE.md#8-v1-迁移说明)
-
----
-
-## 📖 v1 文档（已弃用）
-
-v1 相关文档已移至 `docs/v1/` 目录，仅作为历史参考：
-
-- [v1 架构文档](docs/v1/ARCHITECTURE.md)
-- [v1 API 文档](docs/v1/API.md)
-- [v1 工作原理](docs/v1/HOW_IT_WORKS.md)
-
-⚠️ **v1 已停止维护，新项目请使用 v2**。
-
----
-
-## 🗺️ 路线图
-
-### ✅ Phase 1 (已完成)
+### Phase 1（已完成）
 
 - [x] PostgreSQL + pgvector 统一存储
-- [x] FastAPI REST API
-- [x] Python SDK
-- [x] API Key 多租户认证
-- [x] 偏好 CRUD
 - [x] 向量语义检索
-- [x] 时间范围查询
-- [x] 时间线聚合
+- [x] 时间范围查询和时间线聚合
+- [x] KV 存储
+- [x] 对话管理
+- [x] 文件上传和文本提取
+- [x] Apache AGE 图数据库
+- [x] LLM 记忆分类提取
+- [x] 可插拔 Provider（Embedding/LLM/Storage）
 
-### 🚧 Phase 2 (计划中)
+### Phase 2（计划中）
 
-- [ ] OBS 文档存储（华为云 OBS）
-- [ ] KV 存储（PostgreSQL jsonb）
-- [ ] 图数据库支持（Apache AGE）
-- [ ] LLM 记忆分类器
-- [ ] 配额管理和计费
+- [ ] 配额管理
+- [ ] 用户画像自动生成
+- [ ] 后台任务系统
+- [ ] URL 自动下载和解析
 
-### 📋 Phase 3 (规划中)
+### Phase 3（规划中）
 
 - [ ] 用户 Console（Web UI）
 - [ ] 运维后台
 - [ ] 华为云部署
-- [ ] 监控和告警（Prometheus + Grafana）
+- [ ] 监控和告警
 
 ---
 
-## 🤝 贡献
+## 贡献
 
 欢迎贡献代码、文档或提出建议！
 
@@ -390,25 +333,10 @@ v1 相关文档已移至 `docs/v1/` 目录，仅作为历史参考：
 
 ---
 
-## 📄 许可证
+## 许可证
 
 MIT License - 详见 [LICENSE](LICENSE) 文件
 
 ---
 
-## 🔗 相关链接
-
-- **GitHub**: https://github.com/your-repo/NeuroMemory
-- **Issues**: https://github.com/your-repo/NeuroMemory/issues
-- **文档中心**: [docs/v2/README.md](docs/v2/README.md)
-
----
-
-## 📧 联系方式
-
-- 提交 Issue: https://github.com/your-repo/NeuroMemory/issues
-- 邮箱: your-email@example.com
-
----
-
-**NeuroMemory v2** - 让您的 AI 拥有记忆 🧠
+**NeuroMemory** - 让您的 AI 拥有记忆

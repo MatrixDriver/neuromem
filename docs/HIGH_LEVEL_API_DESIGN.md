@@ -15,7 +15,7 @@
 ### 1.1 添加对话消息
 
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemoryClient
 
 client = NeuroMemoryClient(api_key="nm_xxx")
 
@@ -278,7 +278,7 @@ client.config.set_task_policy(
 ### 6.1 场景：聊天机器人自动记忆
 
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemoryClient
 
 class SmartChatbot:
     def __init__(self, api_key: str):

@@ -1,605 +1,424 @@
-# NeuroMemory v2 快速开始指南
+# NeuroMemory 快速开始指南
 
-> **版本**: v2.0
 > **预计时间**: 10 分钟
-> **最后更新**: 2026-02-10
+> **最后更新**: 2026-02-11
 
 ---
 
 ## 目录
 
 1. [环境要求](#1-环境要求)
-2. [安装部署](#2-安装部署)
-3. [获取 API Key](#3-获取-api-key)
-4. [使用 Python SDK](#4-使用-python-sdk)
-5. [使用 REST API](#5-使用-rest-api)
-6. [下一步](#6-下一步)
-7. [常见问题](#7-常见问题)
+2. [安装](#2-安装)
+3. [基础用法](#3-基础用法)
+4. [功能模块示例](#4-功能模块示例)
+5. [下一步](#5-下一步)
+6. [常见问题](#6-常见问题)
 
 ---
 
 ## 1. 环境要求
 
-### 1.1 系统要求
-
-- **操作系统**: Linux / macOS / Windows
-- **Python**: 3.10 或更高版本
-- **Docker**: 20.0 或更高版本（推荐）
+- **Python**: 3.10+
+- **Docker**: 20.0+（用于运行 PostgreSQL）
 - **内存**: 至少 4GB RAM
 
-### 1.2 检查环境
-
 ```bash
-# 检查 Python 版本
-python --version  # 应该是 3.10+
-
-# 检查 Docker 版本
-docker --version  # 应该是 20.0+
-docker compose version
+python --version   # 3.10+
+docker --version   # 20.0+
 ```
 
 ---
 
-## 2. 安装部署
+## 2. 安装
 
-### 2.1 克隆项目
+### 2.1 启动 PostgreSQL
+
+NeuroMemory 使用 PostgreSQL + pgvector 作为存储后端。提供了预配置的 Docker Compose 文件：
 
 ```bash
 git clone https://github.com/your-repo/NeuroMemory.git
 cd NeuroMemory
-```
 
-### 2.2 配置环境变量
-
-创建 `.env` 文件：
-
-```bash
-# 复制模板
-cp .env.example .env
-
-# 编辑配置
-nano .env
-```
-
-`.env` 文件内容：
-```bash
-# 数据库配置（Docker Compose 会自动使用）
-DATABASE_URL=postgresql+asyncpg://neuromemory:neuromemory@db:5432/neuromemory
-
-# Embedding 服务 API Key
-SILICONFLOW_API_KEY=your-siliconflow-api-key
-
-# 日志级别
-LOG_LEVEL=INFO
-```
-
-**获取 SiliconFlow API Key**:
-1. 访问 [SiliconFlow](https://siliconflow.cn)
-2. 注册账号并创建 API Key
-3. 复制 Key 到 `.env` 文件
-
-### 2.3 启动服务
-
-#### 方式 1: Docker Compose（推荐）
-
-```bash
-# 启动所有服务（数据库 + API）
-docker compose -f docker-compose.v2.yml up -d
-
-# 查看日志
-docker compose -f docker-compose.v2.yml logs -f api
-
-# 检查服务状态
-curl http://localhost:8765/v1/health
-```
-
-#### 方式 2: 本地开发
-
-```bash
-# 1. 启动数据库
+# 启动 PostgreSQL（含 pgvector + Apache AGE 扩展）
 docker compose -f docker-compose.v2.yml up -d db
-
-# 2. 创建虚拟环境
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows
-
-# 3. 安装依赖
-pip install -r requirements.txt
-pip install -e sdk/
-
-# 4. 初始化数据库
-python -m server.app.db.init_db
-
-# 5. 启动 API 服务
-uvicorn server.app.main:app --reload --host 0.0.0.0 --port 8765
 ```
 
-### 2.4 验证部署
-
-访问 API 文档：
-- **Swagger UI**: http://localhost:8765/docs
-- **ReDoc**: http://localhost:8765/redoc
-
-健康检查：
+验证数据库：
 ```bash
-curl http://localhost:8765/v1/health
+docker compose -f docker-compose.v2.yml ps db
+# STATUS 应为 healthy
 ```
 
-预期响应：
-```json
-{
-  "status": "healthy",
-  "database": "connected",
-  "embedding_service": "available",
-  "version": "2.0.0"
-}
+### 2.2 安装 NeuroMemory
+
+```bash
+# 安装核心依赖
+pip install -e .
+
+# 或安装全部可选依赖（推荐）
+pip install -e ".[all]"
 ```
+
+可选依赖说明：
+
+| 依赖组 | 命令 | 用途 |
+|--------|------|------|
+| 核心 | `pip install -e .` | 基础功能（记忆、KV、对话、图） |
+| S3 存储 | `pip install -e ".[s3]"` | 文件上传到 MinIO/S3 |
+| PDF 解析 | `pip install -e ".[pdf]"` | PDF 文本提取 |
+| Word 解析 | `pip install -e ".[docx]"` | Word 文档文本提取 |
+| 开发 | `pip install -e ".[dev]"` | pytest、pytest-asyncio 等测试工具 |
+| 全部 | `pip install -e ".[all]"` | 以上全部 |
+
+### 2.3 获取 Embedding API Key
+
+NeuroMemory 需要 Embedding 服务将文本转为向量。支持两种 Provider：
+
+**SiliconFlow**（推荐，支持中英文）：
+1. 访问 [SiliconFlow](https://siliconflow.cn) 注册
+2. 创建 API Key
+
+**OpenAI**：
+1. 访问 [OpenAI Platform](https://platform.openai.com)
+2. 创建 API Key
 
 ---
 
-## 3. 获取 API Key
+## 3. 基础用法
 
-### 3.1 注册租户
+### 3.1 最小示例
 
-使用 curl 注册：
-
-```bash
-curl -X POST http://localhost:8765/v1/tenants/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "MyCompany",
-    "email": "admin@example.com"
-  }'
-```
-
-或使用 Python：
+创建 `demo.py`：
 
 ```python
-import httpx
+import asyncio
+from neuromemory import NeuroMemory, SiliconFlowEmbedding
 
-response = httpx.post(
-    "http://localhost:8765/v1/tenants/register",
-    json={
-        "name": "MyCompany",
-        "email": "admin@example.com"
-    }
-)
-data = response.json()
-print(f"Your API Key: {data['api_key']}")
+async def main():
+    # 初始化
+    nm = NeuroMemory(
+        database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
+        embedding=SiliconFlowEmbedding(api_key="your-siliconflow-key"),
+    )
+    await nm.init()
+
+    try:
+        # 添加记忆
+        await nm.add_memory(
+            user_id="alice",
+            content="I work at ABC Company as a software engineer",
+            memory_type="fact",
+        )
+        print("Added memory")
+
+        # 语义检索
+        results = await nm.search(user_id="alice", query="Where does Alice work?")
+        for r in results:
+            print(f"  [{r['similarity']:.2f}] {r['content']}")
+    finally:
+        await nm.close()
+
+asyncio.run(main())
 ```
 
-### 3.2 保存 API Key
-
-**响应示例**:
-```json
-{
-  "tenant_id": "550e8400-e29b-41d4-a716-446655440000",
-  "api_key": "nm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "message": "Registration successful. Please save your API key securely."
-}
-```
-
-**⚠️ 重要**:
-- API Key 只显示一次，请妥善保存
-- 如果丢失，需要重新注册新租户
-- 不要将 API Key 提交到 Git 仓库
-
----
-
-## 4. 使用 Python SDK
-
-### 4.1 安装 SDK
-
-```bash
-pip install -e sdk/
-```
-
-### 4.2 快速示例
-
-创建 `demo.py`:
-
-```python
-from neuromemory_client import NeuroMemoryClient
-
-# 初始化客户端（替换为你的 API Key）
-client = NeuroMemoryClient(
-    api_key="nm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    base_url="http://localhost:8765"
-)
-
-# 1. 设置用户偏好
-print("1. Setting preference...")
-client.preferences.set(
-    user_id="alice",
-    key="language",
-    value="zh-CN"
-)
-print("✓ Preference set: language=zh-CN\n")
-
-# 2. 添加记忆
-print("2. Adding memories...")
-client.add_memory(
-    user_id="alice",
-    content="I work at ABC Company as a software engineer",
-    memory_type="fact"
-)
-client.add_memory(
-    user_id="alice",
-    content="My favorite programming language is Python",
-    memory_type="preference"
-)
-client.add_memory(
-    user_id="alice",
-    content="Attended team meeting on project planning",
-    memory_type="episodic"
-)
-print("✓ Added 3 memories\n")
-
-# 3. 语义检索
-print("3. Searching memories...")
-results = client.search(
-    user_id="alice",
-    query="What does Alice do for work?",
-    limit=3
-)
-print(f"Found {len(results)} results:")
-for i, result in enumerate(results, 1):
-    print(f"  {i}. [{result['similarity']:.2f}] {result['content']}")
-print()
-
-# 4. 查询偏好
-print("4. Listing preferences...")
-prefs = client.preferences.list(user_id="alice")
-for pref in prefs:
-    print(f"  {pref['key']}: {pref['value']}")
-print()
-
-# 5. 获取最近记忆
-print("5. Getting recent memories...")
-recent = client.get_recent_memories(user_id="alice", days=7)
-print(f"✓ Found {len(recent)} memories in the last 7 days\n")
-
-# 6. 用户概览
-print("6. User memory overview...")
-overview = client.get_user_memories(user_id="alice")
-print(f"  Total: {overview['total_memories']} memories")
-print(f"  Types: {overview['memory_types']}")
-
-# 关闭客户端
-client.close()
-print("\n✓ Demo completed!")
-```
-
-运行示例：
-
+运行：
 ```bash
 python demo.py
 ```
 
-预期输出：
+### 3.2 使用上下文管理器（推荐）
+
+```python
+async with NeuroMemory(
+    database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
+    embedding=SiliconFlowEmbedding(api_key="your-key"),
+) as nm:
+    await nm.add_memory(user_id="alice", content="I love Python")
+    results = await nm.search(user_id="alice", query="programming")
+    # 退出 with 块时自动关闭连接
 ```
-1. Setting preference...
-✓ Preference set: language=zh-CN
 
-2. Adding memories...
-✓ Added 3 memories
+### 3.3 使用 OpenAI Embedding
 
-3. Searching memories...
-Found 3 results:
-  1. [0.89] I work at ABC Company as a software engineer
-  2. [0.72] Attended team meeting on project planning
-  3. [0.65] My favorite programming language is Python
+```python
+from neuromemory import NeuroMemory, OpenAIEmbedding
 
-4. Listing preferences...
-  language: zh-CN
-
-5. Getting recent memories...
-✓ Found 3 memories in the last 7 days
-
-6. User memory overview...
-  Total: 3 memories
-  Types: {'fact': 1, 'preference': 1, 'episodic': 1}
-
-✓ Demo completed!
+async with NeuroMemory(
+    database_url="...",
+    embedding=OpenAIEmbedding(api_key="your-openai-key"),
+) as nm:
+    # 使用方式完全相同
+    await nm.add_memory(user_id="alice", content="Hello world")
 ```
 
 ---
 
-## 5. 使用 REST API
+## 4. 功能模块示例
 
-### 5.1 设置偏好
+### 4.1 KV 存储
 
-```bash
-curl -X POST http://localhost:8765/v1/preferences \
-  -H "Authorization: Bearer nm_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "alice",
-    "key": "language",
-    "value": "zh-CN"
-  }'
+通用键值存储，适合存储用户偏好、配置等：
+
+```python
+# 存储
+await nm.kv.set("preferences", "alice", "language", "zh-CN")
+await nm.kv.set("preferences", "alice", "theme", {"mode": "dark", "color": "blue"})
+
+# 读取
+value = await nm.kv.get("preferences", "alice", "language")
+print(value)  # "zh-CN"
+
+# 列出
+items = await nm.kv.list("preferences", "alice")
+for item in items:
+    print(f"  {item.key}: {item.value}")
+
+# 删除
+await nm.kv.delete("preferences", "alice", "language")
 ```
 
-### 5.2 添加记忆
+### 4.2 对话管理
 
-```bash
-curl -X POST http://localhost:8765/v1/memories \
-  -H "Authorization: Bearer nm_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "alice",
-    "content": "I work at ABC Company",
-    "memory_type": "fact"
-  }'
+存储和管理会话消息：
+
+```python
+# 添加单条消息
+msg = await nm.conversations.add_message(
+    user_id="alice", role="user", content="Hello!"
+)
+print(f"Session: {msg.session_id}")
+
+# 批量添加
+session_id, ids = await nm.conversations.add_messages_batch(
+    user_id="alice",
+    messages=[
+        {"role": "user", "content": "What's the weather?"},
+        {"role": "assistant", "content": "It's sunny today!"},
+    ],
+)
+
+# 获取会话历史
+messages = await nm.conversations.get_history(
+    user_id="alice", session_id=session_id
+)
+
+# 列出所有会话
+total, sessions = await nm.conversations.list_sessions(user_id="alice")
 ```
 
-### 5.3 语义检索
+### 4.3 文件管理
 
-```bash
-curl -X POST http://localhost:8765/v1/search \
-  -H "Authorization: Bearer nm_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "alice",
-    "query": "workplace",
-    "limit": 5
-  }'
+需要配置 S3/MinIO 存储：
+
+```python
+from neuromemory import NeuroMemory, SiliconFlowEmbedding, S3Storage
+
+async with NeuroMemory(
+    database_url="...",
+    embedding=SiliconFlowEmbedding(api_key="..."),
+    storage=S3Storage(
+        endpoint="http://localhost:9000",
+        access_key="neuromemory",
+        secret_key="neuromemory123",
+        bucket="neuromemory",
+    ),
+) as nm:
+    # 上传文件（自动提取文本和生成 embedding）
+    doc = await nm.files.upload(
+        user_id="alice",
+        filename="report.pdf",
+        file_data=open("report.pdf", "rb").read(),
+        category="work",
+    )
+    print(f"Uploaded: {doc.filename}, extracted text: {len(doc.extracted_text)} chars")
+
+    # 列出文件
+    docs = await nm.files.list_documents(user_id="alice")
+
+    # 删除文件
+    await nm.files.delete(file_id=doc.id)
 ```
 
-### 5.4 查询偏好
-
+启动 MinIO：
 ```bash
-curl http://localhost:8765/v1/preferences?user_id=alice \
-  -H "Authorization: Bearer nm_xxx"
+docker compose -f docker-compose.v2.yml up -d minio
 ```
 
-### 5.5 时间范围查询
+### 4.4 图数据库
 
-```bash
-curl -X POST http://localhost:8765/v1/memories/time-range \
-  -H "Authorization: Bearer nm_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "alice",
-    "start_time": "2026-02-01T00:00:00Z",
-    "end_time": "2026-02-10T23:59:59Z",
-    "limit": 50
-  }'
+基于 Apache AGE 的知识图谱：
+
+```python
+from neuromemory.models.graph import NodeType, EdgeType
+
+# 创建节点
+await nm.graph.create_node(
+    NodeType.USER, "alice", properties={"name": "Alice", "age": 30}
+)
+await nm.graph.create_node(
+    NodeType.TOPIC, "python", properties={"name": "Python"}
+)
+
+# 创建关系
+await nm.graph.create_edge(
+    NodeType.USER, "alice",
+    EdgeType.INTERESTED_IN,
+    NodeType.TOPIC, "python",
+)
+
+# 查询邻居
+neighbors = await nm.graph.get_neighbors(NodeType.USER, "alice")
+
+# 查找路径
+path = await nm.graph.find_path(
+    NodeType.USER, "alice",
+    NodeType.TOPIC, "python",
+    max_depth=3,
+)
+```
+
+### 4.5 记忆提取（需要 LLM）
+
+从对话中自动提取记忆：
+
+```python
+from neuromemory import OpenAILLM
+
+async with NeuroMemory(
+    database_url="...",
+    embedding=SiliconFlowEmbedding(api_key="..."),
+    llm=OpenAILLM(api_key="...", model="deepseek-chat"),
+) as nm:
+    # 先添加对话
+    await nm.conversations.add_messages_batch(
+        user_id="alice",
+        messages=[
+            {"role": "user", "content": "I just started working at Google"},
+            {"role": "assistant", "content": "Congratulations!"},
+            {"role": "user", "content": "I love Python and machine learning"},
+        ],
+    )
+
+    # 自动提取记忆
+    stats = await nm.extract_memories(user_id="alice")
+    print(f"Extracted: {stats['facts_extracted']} facts, "
+          f"{stats['preferences_extracted']} preferences, "
+          f"{stats['episodes_extracted']} episodes")
 ```
 
 ---
 
-## 6. 下一步
+## 5. 下一步
 
-### 6.1 深入学习
-
-- 📖 [架构文档](ARCHITECTURE.md) - 了解系统设计
-- 📚 [API 参考](API_REFERENCE.md) - 完整的 API 端点文档
-- 🐍 [SDK 指南](SDK_GUIDE.md) - Python SDK 详细用法
-- 🔒 [安全最佳实践](#) - API Key 管理、数据隔离
-
-### 6.2 功能探索
-
-**偏好管理**:
-```python
-# 存储复杂对象
-client.preferences.set(
-    user_id="alice",
-    key="ui_settings",
-    value={
-        "theme": "dark",
-        "sidebar": "collapsed",
-        "notifications": {"email": True, "push": False}
-    }
-)
-```
-
-**时间查询**:
-```python
-from datetime import datetime, timezone
-
-# 查询特定月份的记忆
-results = client.memory.get_by_time_range(
-    user_id="alice",
-    start_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
-    end_time=datetime(2026, 1, 31, 23, 59, 59, tzinfo=timezone.utc)
-)
-```
-
-**时间线统计**:
-```python
-from datetime import date
-
-# 按周统计记忆
-timeline = client.get_memory_timeline(
-    user_id="alice",
-    start_date=date(2026, 1, 1),
-    end_date=date(2026, 12, 31),
-    granularity="week"
-)
-```
-
-### 6.3 生产部署
-
-准备将服务部署到生产环境？
-
-1. **环境变量**:
-   - 使用强密码配置数据库
-   - 配置生产级的 `DATABASE_URL`
-   - 设置 `LOG_LEVEL=WARNING` 或 `ERROR`
-
-2. **HTTPS 配置**:
-   - 使用 Nginx 或 Traefik 作为反向代理
-   - 配置 SSL 证书（Let's Encrypt）
-
-3. **数据库**:
-   - 使用云托管 PostgreSQL（AWS RDS、阿里云 RDS 等）
-   - 启用自动备份
-   - 配置连接池
-
-4. **监控**:
-   - 配置日志聚合（ELK、Loki）
-   - 设置健康检查和告警
+- **[架构设计](ARCHITECTURE.md)** — 了解 Provider 模式、数据模型、设计原则
+- **[使用指南](SDK_GUIDE.md)** — 完整 API 参考和高级用法
+- **[CLAUDE.md](../../CLAUDE.md)** — 开发约定和项目结构
 
 ---
 
-## 7. 常见问题
+## 6. 常见问题
 
-### 7.1 服务无法启动
+### 6.1 数据库连接失败
 
-**问题**: Docker Compose 启动失败
+**问题**: `connection refused`
 
-**解决方案**:
+**解决**:
 ```bash
-# 检查端口占用
-lsof -i :8765  # API 端口
-lsof -i :5432  # PostgreSQL 端口
+# 检查容器状态
+docker compose -f docker-compose.v2.yml ps db
 
-# 查看详细日志
-docker compose -f docker-compose.v2.yml logs
+# 重启数据库
+docker compose -f docker-compose.v2.yml restart db
 
-# 重新构建镜像
-docker compose -f docker-compose.v2.yml build --no-cache
-docker compose -f docker-compose.v2.yml up -d
+# 查看日志
+docker compose -f docker-compose.v2.yml logs db
 ```
 
-### 7.2 数据库连接失败
+### 6.2 表不存在
 
-**问题**: `connection refused` 或 `database does not exist`
+**问题**: `relation "embeddings" does not exist`
 
-**解决方案**:
-```bash
-# 检查数据库容器状态
-docker compose -f docker-compose.v2.yml ps
+**解决**: `nm.init()` 会自动创建表。确保在使用前调用了 `await nm.init()`（使用 `async with` 会自动调用）。
 
-# 初始化数据库
-docker compose -f docker-compose.v2.yml exec api \
-  python -m server.app.db.init_db
+### 6.3 向量维度不匹配
 
-# 检查环境变量
-docker compose -f docker-compose.v2.yml exec api env | grep DATABASE_URL
+**问题**: `expected 1024 dimensions, got 1536`
+
+**原因**: 切换了 Embedding Provider 但数据库中已有旧维度的表。
+
+**解决**: 删除旧表重建（开发环境）：
+```sql
+DROP TABLE IF EXISTS embeddings CASCADE;
 ```
+然后重新运行 `await nm.init()`。
 
-### 7.3 Embedding 服务不可用
+### 6.4 Embedding API 报错
 
-**问题**: `503 Service Unavailable` 或 `Embedding service unavailable`
+**问题**: `401 Unauthorized` 或 API 调用失败
 
-**解决方案**:
-1. 检查 `.env` 文件中的 `SILICONFLOW_API_KEY` 是否正确
-2. 验证 API Key 是否有效：
-   ```bash
-   curl https://api.siliconflow.cn/v1/embeddings \
-     -H "Authorization: Bearer YOUR_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"model": "BAAI/bge-m3", "input": "test"}'
-   ```
-3. 检查网络连接（防火墙、代理）
+**解决**:
+1. 检查 API Key 是否正确
+2. 测试 API Key 是否有效（SiliconFlow 或 OpenAI 控制台）
+3. 检查网络连接
 
-### 7.4 API Key 丢失
+### 6.5 文件上传失败
 
-**问题**: 忘记保存 API Key
+**问题**: `Storage not configured`
 
-**解决方案**:
-- API Key 无法恢复，需要重新注册新租户
-- 或者直接查询数据库（仅开发环境）：
-  ```bash
-  docker compose -f docker-compose.v2.yml exec db psql -U neuromemory -d neuromemory \
-    -c "SELECT id, name, email FROM tenants;"
-  ```
-
-### 7.5 搜索结果为空
-
-**问题**: `client.search()` 返回空列表
-
-**可能原因**:
-1. 没有添加记忆数据
-2. `user_id` 不匹配
-3. 时间过滤条件过于严格
-4. Embedding 生成失败
-
-**调试步骤**:
+**解决**: 文件功能需要配置 `S3Storage`：
 ```python
-# 1. 检查记忆总数
-overview = client.get_user_memories(user_id="alice")
-print(overview)
-
-# 2. 列出最近记忆
-recent = client.get_recent_memories(user_id="alice", days=30)
-print(f"Recent memories: {len(recent)}")
-
-# 3. 不使用过滤条件
-results = client.search(user_id="alice", query="test", limit=100)
-print(f"Total results: {len(results)}")
+nm = NeuroMemory(
+    ...,
+    storage=S3Storage(endpoint="http://localhost:9000", ...),
+)
 ```
-
-### 7.6 性能问题
-
-**问题**: API 响应慢
-
-**优化建议**:
-1. **数据库索引**: 确保已运行 `migrations/001_add_time_indexes.sql`
-2. **限制结果数**: 使用合理的 `limit` 参数（默认 5-50）
-3. **分页查询**: 使用 `offset` 避免一次性加载大量数据
-4. **连接池**: 增加数据库连接池大小（生产环境）
+确保 MinIO 已启动：`docker compose -f docker-compose.v2.yml up -d minio`
 
 ---
 
 ## 附录
 
-### A. 环境变量完整列表
+### A. 环境变量配置
 
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `DATABASE_URL` | 是 | - | PostgreSQL 连接字符串 |
-| `SILICONFLOW_API_KEY` | 是 | - | SiliconFlow API Key |
-| `EMBEDDING_PROVIDER` | 否 | `siliconflow` | Embedding 提供商 |
-| `LOG_LEVEL` | 否 | `INFO` | 日志级别 (DEBUG/INFO/WARNING/ERROR) |
+推荐使用环境变量管理敏感信息：
 
-### B. 端口说明
+```python
+import os
+from neuromemory import NeuroMemory, SiliconFlowEmbedding
+
+nm = NeuroMemory(
+    database_url=os.environ["DATABASE_URL"],
+    embedding=SiliconFlowEmbedding(api_key=os.environ["SILICONFLOW_API_KEY"]),
+)
+```
+
+### B. 服务端口
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| API Server | 8765 | REST API 端点 |
-| PostgreSQL | 5432 | 数据库（内部网络） |
+| PostgreSQL | 5432 | 数据库 |
+| MinIO API | 9000 | 对象存储 |
+| MinIO Console | 9001 | MinIO 管理界面 |
 
-### C. 数据目录
-
-```
-.
-├── .env                # 环境变量配置
-├── docker-compose.v2.yml  # Docker Compose 配置
-├── server/             # API 服务端代码
-├── sdk/                # Python SDK 代码
-└── postgres_data/      # PostgreSQL 数据卷（Docker 创建）
-```
-
-### D. 有用的命令
+### C. 常用命令
 
 ```bash
-# 查看所有容器
-docker compose -f docker-compose.v2.yml ps
+# 启动全部服务
+docker compose -f docker-compose.v2.yml up -d
 
-# 重启 API 服务
-docker compose -f docker-compose.v2.yml restart api
+# 只启动数据库
+docker compose -f docker-compose.v2.yml up -d db
 
-# 查看 API 日志
-docker compose -f docker-compose.v2.yml logs -f api
-
-# 进入数据库容器
-docker compose -f docker-compose.v2.yml exec db psql -U neuromemory
-
-# 停止所有服务
+# 停止全部服务
 docker compose -f docker-compose.v2.yml down
 
-# 清理数据（⚠️ 会删除所有数据）
+# 清理数据（会删除所有数据）
 docker compose -f docker-compose.v2.yml down -v
+
+# 运行测试
+pytest tests/ -v --timeout=30
 ```
 
 ---
 
-**需要帮助？**
-- 📧 提交 Issue: https://github.com/your-repo/NeuroMemory/issues
-- 📖 查看完整文档: [docs/v2/](.)
-
-**祝使用愉快！** 🎉
+**需要帮助？** 提交 Issue: https://github.com/your-repo/NeuroMemory/issues

@@ -23,7 +23,7 @@ RUN cd /tmp && \
 
 # Install Apache AGE
 RUN cd /tmp && \
-    git clone --branch PG16/v1.5.0 https://github.com/apache/age.git && \
+    git clone --branch release/PG16/1.6.0 https://github.com/apache/age.git && \
     cd age && \
     make PG_CONFIG=/usr/bin/pg_config install && \
     cd / && \

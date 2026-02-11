@@ -103,4 +103,4 @@ The project uses Spring Boot DevTools for hot reload during development.
 
 ## Compatibility
 
-The Java server is fully compatible with the existing Python SDK (`sdk/neuromemory_client/`). No changes needed on the client side.
+The Java server is fully compatible with the existing Python SDK (`sdk/neuromemory/`). No changes needed on the client side.

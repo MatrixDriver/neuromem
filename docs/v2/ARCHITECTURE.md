@@ -1,8 +1,6 @@
-# NeuroMemory v2 架构文档
+# NeuroMemory 架构文档
 
-> **版本**: v2.0
-> **状态**: 生产就绪
-> **最后更新**: 2026-02-10
+> **最后更新**: 2026-02-11
 
 ---
 
@@ -10,12 +8,11 @@
 
 1. [架构概览](#1-架构概览)
 2. [技术栈](#2-技术栈)
-3. [核心组件](#3-核心组件)
+3. [核心设计模式](#3-核心设计模式)
 4. [数据模型](#4-数据模型)
-5. [认证与多租户](#5-认证与多租户)
-6. [API 设计](#6-api-设计)
+5. [Provider 系统](#5-provider-系统)
+6. [服务层](#6-服务层)
 7. [部署架构](#7-部署架构)
-8. [v1 迁移说明](#8-v1-迁移说明)
 
 ---
 
@@ -23,603 +20,405 @@
 
 ### 1.1 设计理念
 
-NeuroMemory v2 是一个 **Memory-as-a-Service (MaaS)** 平台，为 AI agent 开发者提供记忆管理服务。通过简化架构，采用 PostgreSQL 统一存储方案，降低部署复杂度，同时保持高性能的向量检索能力。
+NeuroMemory 是一个 **Python 框架**（非 Client-Server），AI agent 开发者直接 `from neuromemory import NeuroMemory` 嵌入自己的程序使用。核心设计原则：
+
+1. **框架而非服务**: 无需部署后台服务器，直接在 Python 程序中使用
+2. **可插拔 Provider**: Embedding、LLM、Storage 通过抽象接口注入
+3. **异步优先**: 全链路 async/await
+4. **user_id 隔离**: 数据按 user_id 隔离，无多租户
+5. **门面模式**: 简洁的顶层 API，复杂逻辑在服务层
 
 ### 1.2 系统架构图
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    NeuroMemory v2 架构                        │
+│                   NeuroMemory 架构                           │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │              客户端层 (Client Layer)                  │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │  │
-│  │  │ Python SDK   │  │  REST API    │  │    CLI       │ │  │
-│  │  │   (httpx)    │  │  (HTTP/JSON) │  │   (Typer)    │ │  │
-│  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘ │  │
-│  └─────────┼──────────────────┼──────────────────┼─────────┘  │
-│            │                  │                  │            │
-│  ┌─────────▼──────────────────▼──────────────────▼─────────┐  │
-│  │              API 服务层 (FastAPI)                        │  │
-│  │  ┌──────────────────────────────────────────────────┐   │  │
-│  │  │  认证中间件 (API Key Bearer Token)              │   │  │
-│  │  └──────────────────┬───────────────────────────────┘   │  │
-│  │  ┌─────────────────┴─────────────────────────────────┐  │  │
-│  │  │  REST 端点                                        │  │  │
-│  │  │  • /v1/tenants/register  - 租户注册              │  │  │
-│  │  │  • /v1/preferences       - 偏好 CRUD             │  │  │
-│  │  │  • /v1/memories          - 记忆添加              │  │  │
-│  │  │  • /v1/search            - 语义检索              │  │  │
-│  │  │  • /v1/memories/time-range - 时间范围查询        │  │  │
-│  │  │  • /v1/memories/recent   - 最近记忆              │  │  │
-│  │  │  • /v1/memories/timeline - 时间线聚合            │  │  │
-│  │  └───────────────────┬───────────────────────────────┘  │  │
-│  └────────────────────────┼──────────────────────────────────┘  │
-│                           │                                    │
-│  ┌────────────────────────▼──────────────────────────────────┐  │
-│  │              服务层 (Service Layer)                       │  │
-│  │  ┌───────────────┐  ┌────────────────┐  ┌─────────────┐  │  │
-│  │  │ AuthService   │  │ MemoryService  │  │ SearchService│  │  │
-│  │  │ - 认证验证    │  │ - 时间查询     │  │ - 向量检索  │  │  │
-│  │  │ - tenant 隔离 │  │ - CRUD 操作    │  │ - embedding │  │  │
-│  │  └───────────────┘  └────────────────┘  └─────────────┘  │  │
-│  │  ┌─────────────────────────────────────────────────────┐  │  │
-│  │  │ PreferencesService - 偏好管理                       │  │  │
-│  │  └─────────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────┬─────────────────────────────────┘  │
-│                              │                                    │
-│  ┌───────────────────────────▼─────────────────────────────────┐  │
-│  │              ORM 层 (SQLAlchemy 2.0 Async)                  │  │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │  │
-│  │  │ Tenant       │  │ ApiKey       │  │ Preference   │     │  │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘     │  │
-│  │  ┌──────────────┐  ┌──────────────────────────────────┐   │  │
-│  │  │ Embedding    │  │ TimestampMixin (created_at,      │   │  │
-│  │  │ (pgvector)   │  │  updated_at, deleted_at)         │   │  │
-│  │  └──────────────┘  └──────────────────────────────────┘   │  │
-│  └───────────────────────────┬─────────────────────────────────┘  │
-│                              │                                    │
-│  ┌───────────────────────────▼─────────────────────────────────┐  │
-│  │         存储层 (PostgreSQL 16 + pgvector)                   │  │
-│  │  ┌────────────────────────────────────────────────────────┐ │  │
-│  │  │  • 结构化数据 (租户、偏好、元数据)                     │ │  │
-│  │  │  • 向量数据 (1024 维 embedding, cosine 距离)          │ │  │
-│  │  │  • BRIN 索引 (时间序列优化)                            │ │  │
-│  │  │  • B-tree 复合索引 (tenant_id, user_id, created_at)  │ │  │
-│  │  └────────────────────────────────────────────────────────┘ │  │
-│  └─────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌─────────────────────────────────────────────────────────────┐  │
-│  │         外部服务 (External Services)                         │  │
-│  │  ┌────────────────────────────────────────────────────────┐ │  │
-│  │  │  SiliconFlow Embedding API                             │ │  │
-│  │  │  • 模型: BAAI/bge-m3                                   │ │  │
-│  │  │  • 维度: 1024                                          │ │  │
-│  │  │  • 支持中英文                                          │ │  │
-│  │  └────────────────────────────────────────────────────────┘ │  │
-│  └─────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-└───────────────────────────────────────────────────────────────────┘
+│  │  应用层 (Your Agent Code)                             │  │
+│  │  nm = NeuroMemory(database_url=..., embedding=...)    │  │
+│  └──────────────────────┬───────────────────────────────┘  │
+│                         │                                   │
+│  ┌──────────────────────▼───────────────────────────────┐  │
+│  │  门面层 (neuromemory/_core.py)                        │  │
+│  │  NeuroMemory 主类                                     │  │
+│  │  ├── nm.add_memory() / nm.search()                    │  │
+│  │  ├── nm.kv          (KVFacade)                        │  │
+│  │  ├── nm.conversations (ConversationsFacade)           │  │
+│  │  ├── nm.files       (FilesFacade)                     │  │
+│  │  └── nm.graph       (GraphFacade)                     │  │
+│  └──────────────────────┬───────────────────────────────┘  │
+│                         │                                   │
+│  ┌──────────────────────▼───────────────────────────────┐  │
+│  │  服务层 (neuromemory/services/)                        │  │
+│  │  SearchService │ KVService │ ConversationService       │  │
+│  │  FileService │ GraphService │ MemoryExtractionService  │  │
+│  │  MemoryService │ FileProcessor                        │  │
+│  └──────────────────────┬───────────────────────────────┘  │
+│                         │                                   │
+│  ┌──────────────────────▼───────────────────────────────┐  │
+│  │  Provider 层 (neuromemory/providers/)                  │  │
+│  │  EmbeddingProvider (ABC)                               │  │
+│  │  ├── SiliconFlowEmbedding (BAAI/bge-m3, 1024 维)     │  │
+│  │  └── OpenAIEmbedding (text-embedding-3-small, 1536 维)│  │
+│  │  LLMProvider (ABC)                                     │  │
+│  │  └── OpenAILLM (兼容 OpenAI/DeepSeek)                 │  │
+│  │  ObjectStorage (ABC)                                   │  │
+│  │  └── S3Storage (MinIO/AWS/OBS)                        │  │
+│  └──────────────────────┬───────────────────────────────┘  │
+│                         │                                   │
+│  ┌──────────────────────▼───────────────────────────────┐  │
+│  │  数据层                                               │  │
+│  │  Database (neuromemory/db.py)                          │  │
+│  │  ├── PostgreSQL + pgvector (向量 + 结构化)            │  │
+│  │  ├── Apache AGE (图数据库)                             │  │
+│  │  └── SQLAlchemy 2.0 async (asyncpg)                   │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  外部存储 (可选)                                       │  │
+│  │  MinIO / AWS S3 / 华为云 OBS (文件存储)               │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
 ```
-
-### 1.3 核心设计原则
-
-1. **简化架构**: 从 v1 的三层存储（Neo4j + Qdrant + LLM）简化为 PostgreSQL 统一存储
-2. **多租户隔离**: 所有数据按 `tenant_id` 严格隔离，支持 SaaS 模式
-3. **异步优先**: 全栈异步设计（async/await），提升并发性能
-4. **API 优先**: REST API 作为核心接口，SDK 是轻量封装
-5. **类型安全**: Pydantic 模型定义所有请求/响应，自动生成 OpenAPI 文档
 
 ---
 
 ## 2. 技术栈
 
-### 2.1 技术选型
-
 | 组件 | 技术 | 版本 | 说明 |
 |------|------|------|------|
-| **API 框架** | FastAPI | 0.104+ | 高性能异步 Web 框架 |
+| **语言** | Python | 3.10+ | async/await 全链路 |
 | **数据库** | PostgreSQL | 16+ | 统一存储后端 |
-| **向量扩展** | pgvector | 0.5+ | PostgreSQL 向量插件 |
-| **ORM** | SQLAlchemy | 2.0+ | 异步 ORM，asyncpg 驱动 |
-| **Schema 验证** | Pydantic | 2.0+ | 请求/响应模型定义 |
-| **HTTP 客户端** | httpx | 0.25+ | SDK 同步 HTTP 客户端 |
-| **Embedding** | SiliconFlow | - | BAAI/bge-m3 (1024 维) |
-| **容器化** | Docker | 20+ | 服务打包和部署 |
-
-### 2.2 为什么选择 PostgreSQL + pgvector？
-
-**相比 v1 的 Neo4j + Qdrant：**
-
-| 维度 | v1 (Neo4j + Qdrant) | v2 (PostgreSQL + pgvector) |
-|------|---------------------|---------------------------|
-| **部署复杂度** | 需要 3 个独立服务 | 只需 2 个服务（API + DB） |
-| **运维成本** | 3 套监控、备份、升级 | 单一数据库，统一运维 |
-| **数据一致性** | 跨库事务困难 | 原生 ACID 事务支持 |
-| **查询性能** | 向量检索快，但需跨库 | pgvector 性能接近专用 VectorDB |
-| **学习曲线** | 需要学习 Cypher + Qdrant API | 标准 SQL + 少量向量扩展 |
-| **成本** | 企业版 Neo4j 昂贵 | PostgreSQL 完全开源免费 |
-
-**pgvector 性能优化：**
-- **HNSW 索引**: 近似最近邻搜索，性能接近 Qdrant
-- **BRIN 索引**: 时间序列数据，节省 99% 空间
-- **并行查询**: PostgreSQL 原生并行执行优化
+| **向量扩展** | pgvector | 0.7+ | 向量相似度检索 |
+| **图扩展** | Apache AGE | 1.6+ | Cypher 查询语言 |
+| **ORM** | SQLAlchemy | 2.0+ | asyncpg 异步驱动 |
+| **Embedding** | SiliconFlow / OpenAI | - | 可插拔 Provider |
+| **LLM** | OpenAI / DeepSeek | - | 记忆分类提取 |
+| **文件存储** | boto3 | - | S3 兼容接口 |
 
 ---
 
-## 3. 核心组件
+## 3. 核心设计模式
 
-### 3.1 API 服务层
+### 3.1 门面模式 (Facade)
 
-**文件**: `server/app/main.py`
+`NeuroMemory` 主类是门面，提供简洁的顶层 API。每个子模块是一个 Facade 类：
 
-FastAPI 应用入口，注册路由、中间件、异常处理。
-
-**核心路由**:
-- `/v1/tenants/*` - 租户管理
-- `/v1/preferences/*` - 偏好 CRUD
-- `/v1/memories/*` - 记忆管理
-- `/v1/search` - 语义检索
-
-### 3.2 认证服务
-
-**文件**: `server/app/services/auth.py`
-
-**功能**:
-- API Key 验证（Bearer Token）
-- SHA-256 哈希存储
-- Tenant 上下文注入（`get_current_tenant` 依赖）
-
-**流程**:
 ```python
-# 请求头
-Authorization: Bearer nm_1234567890abcdef
-
-# 验证流程
-1. 提取 Bearer Token
-2. SHA-256 哈希
-3. 数据库查询匹配
-4. 返回 tenant_id
+class NeuroMemory:
+    def __init__(self, database_url, embedding, llm=None, storage=None):
+        self._db = Database(database_url)
+        self._embedding = embedding
+        self.kv = KVFacade(self._db)
+        self.conversations = ConversationsFacade(self._db)
+        self.files = FilesFacade(self._db, embedding, storage)
+        self.graph = GraphFacade(self._db)
 ```
 
-### 3.3 服务层
+Facade 类每次操作开启独立 session：
 
-#### PreferencesService
-**文件**: `server/app/services/preferences.py`
-
-- `set_preference()`: Upsert 偏好（支持 JSON 值）
-- `get_preference()`: 按 key 查询
-- `list_preferences()`: 列出用户所有偏好
-- `delete_preference()`: 删除偏好
-
-#### SearchService
-**文件**: `server/app/services/search.py`
-
-- `search_memories()`: 向量相似度搜索（cosine 距离）
-- 支持时间过滤（`created_after`, `created_before`）
-- 支持记忆类型过滤（`memory_type`）
-
-#### MemoryService
-**文件**: `server/app/services/memory.py`
-
-- `get_memories_by_time_range()`: 时间范围查询
-- `get_recent_memories()`: 最近 N 天记忆
-- `get_daily_memory_stats()`: 按日统计
-- `get_memory_timeline()`: 时间线聚合（日/周/月）
-
-### 3.4 Embedding 服务
-
-**文件**: `server/app/services/embedding.py`
-
-**流程**:
+```python
+class KVFacade:
+    async def set(self, namespace, scope_id, key, value):
+        async with self._db.session() as session:
+            return await KVService(session).set(namespace, scope_id, key, value)
 ```
-用户输入文本
-    ↓
-SiliconFlow API
-    ↓
-BAAI/bge-m3 模型
-    ↓
-1024 维向量
-    ↓
-存入 PostgreSQL (vector 类型)
+
+### 3.2 Provider 注入
+
+Provider 通过构造函数注入，不使用全局单例：
+
+```python
+# 开发者选择 Provider
+nm = NeuroMemory(
+    database_url="...",
+    embedding=SiliconFlowEmbedding(api_key="..."),  # 或 OpenAIEmbedding
+    llm=OpenAILLM(api_key="..."),                    # 可选
+    storage=S3Storage(endpoint="..."),                # 可选
+)
 ```
+
+### 3.3 Database 类
+
+替代 FastAPI 的 `get_db` 依赖注入，提供 session 上下文管理器：
+
+```python
+class Database:
+    def __init__(self, url, pool_size=10):
+        self.engine = create_async_engine(url, pool_size=pool_size)
+        self.session_factory = async_sessionmaker(engine, ...)
+
+    @asynccontextmanager
+    async def session(self):
+        async with self.session_factory() as s:
+            try:
+                yield s
+                await s.commit()
+            except:
+                await s.rollback()
+                raise
+
+    async def init(self):   # CREATE EXTENSION vector; create_all
+    async def close(self):  # engine.dispose()
+```
+
+### 3.4 动态向量维度
+
+Embedding 维度在运行时确定（不同 Provider 维度不同）：
+
+```python
+# neuromemory/models/__init__.py
+_embedding_dims = 1024  # 默认值
+
+# NeuroMemory.__init__() 中设置
+import neuromemory.models as _models
+_models._embedding_dims = embedding.dims  # 在 init() 建表前设置
+```
+
+`Embedding` 模型使用 `__declare_last__` 在表创建时读取维度值。
 
 ---
 
 ## 4. 数据模型
 
-### 4.1 数据库表结构
+所有模型按 `user_id` 隔离，无 `tenant_id`。
 
-#### tenants (租户表)
+### 4.1 embeddings (向量存储)
+
 ```sql
-CREATE TABLE tenants (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    deleted_at TIMESTAMP WITH TIME ZONE
-);
-```
-
-#### api_keys (API 密钥表)
-```sql
-CREATE TABLE api_keys (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
-    key_hash VARCHAR(64) NOT NULL UNIQUE,  -- SHA-256
-    name VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    expires_at TIMESTAMP WITH TIME ZONE,
-    last_used_at TIMESTAMP WITH TIME ZONE
-);
-```
-
-#### preferences (偏好表)
-```sql
-CREATE TABLE preferences (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
-    user_id VARCHAR(255) NOT NULL,
-    key VARCHAR(255) NOT NULL,
-    value JSONB NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(tenant_id, user_id, key)
-);
-```
-
-#### embeddings (向量存储表)
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE embeddings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
+    id UUID PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
+    embedding vector(1024),  -- 维度由 Provider 决定
     memory_type VARCHAR(50) DEFAULT 'general',
     metadata_ JSONB,
-    embedding vector(1024),  -- pgvector 类型
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    deleted_at TIMESTAMP WITH TIME ZONE
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
 );
 
--- 向量相似度索引
-CREATE INDEX idx_embeddings_vector ON embeddings
-USING hnsw (embedding vector_cosine_ops);
-
--- 时间序列索引 (BRIN, 节省 99% 空间)
-CREATE INDEX idx_embeddings_created_at_brin ON embeddings
-USING BRIN (created_at) WITH (pages_per_range = 128);
-
--- 复合索引 (多列过滤 + 排序)
-CREATE INDEX idx_embeddings_tenant_user_created ON embeddings
-(tenant_id, user_id, created_at DESC);
+-- 向量索引
+CREATE INDEX idx_emb_vector ON embeddings USING hnsw (embedding vector_cosine_ops);
+-- 用户索引
+CREATE INDEX ix_emb_user ON embeddings (user_id);
 ```
 
-### 4.2 多租户数据隔离
+### 4.2 key_values (KV 存储)
 
-**原则**: 所有查询必须包含 `tenant_id` 过滤
+```sql
+CREATE TABLE key_values (
+    id UUID PRIMARY KEY,
+    namespace VARCHAR(255) NOT NULL,
+    scope_id VARCHAR(255) NOT NULL,
+    key VARCHAR(255) NOT NULL,
+    value JSONB NOT NULL,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
+    UNIQUE (namespace, scope_id, key)
+);
+```
+
+### 4.3 conversations (对话)
+
+```sql
+CREATE TABLE conversations (
+    id UUID PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    session_id VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL,
+    content TEXT NOT NULL,
+    extracted BOOLEAN DEFAULT FALSE,
+    metadata_ JSONB,
+    created_at TIMESTAMPTZ
+);
+
+CREATE TABLE conversation_sessions (
+    id UUID PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    session_id VARCHAR(255) NOT NULL UNIQUE,
+    message_count INTEGER DEFAULT 0,
+    last_message_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
+);
+```
+
+### 4.4 documents (文件)
+
+```sql
+CREATE TABLE documents (
+    id UUID PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    filename VARCHAR(500) NOT NULL,
+    file_type VARCHAR(50),
+    mime_type VARCHAR(100),
+    file_size INTEGER,
+    object_key VARCHAR(500),
+    extracted_text TEXT,
+    embedding_id UUID REFERENCES embeddings(id),
+    category VARCHAR(100) DEFAULT 'general',
+    tags JSONB,
+    metadata_ JSONB,
+    source_type VARCHAR(50),
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
+);
+```
+
+### 4.5 graph_nodes / graph_edges (图)
+
+```sql
+CREATE TABLE graph_nodes (
+    id UUID PRIMARY KEY,
+    user_id VARCHAR(255),
+    node_type VARCHAR(100) NOT NULL,
+    node_id VARCHAR(255) NOT NULL,
+    properties JSONB,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
+);
+
+CREATE TABLE graph_edges (
+    id UUID PRIMARY KEY,
+    user_id VARCHAR(255),
+    source_type VARCHAR(100) NOT NULL,
+    source_id VARCHAR(255) NOT NULL,
+    edge_type VARCHAR(100) NOT NULL,
+    target_type VARCHAR(100) NOT NULL,
+    target_id VARCHAR(255) NOT NULL,
+    properties JSONB,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
+);
+```
+
+图数据同时存储在 PostgreSQL 表（用于 CRUD）和 Apache AGE（用于 Cypher 查询）。
+
+---
+
+## 5. Provider 系统
+
+### 5.1 EmbeddingProvider
 
 ```python
-# ✅ 正确：包含 tenant_id 过滤
-query = select(Embedding).where(
-    Embedding.tenant_id == tenant_id,
-    Embedding.user_id == user_id
-)
+class EmbeddingProvider(ABC):
+    @abstractmethod
+    async def embed(self, text: str) -> list[float]: ...
 
-# ❌ 错误：缺少 tenant_id 过滤（可能泄露其他租户数据）
-query = select(Embedding).where(
-    Embedding.user_id == user_id
-)
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]: ...
+
+    @property
+    @abstractmethod
+    def dims(self) -> int: ...
+```
+
+内置实现：
+- `SiliconFlowEmbedding`: BAAI/bge-m3, 1024 维，支持中英文
+- `OpenAIEmbedding`: text-embedding-3-small, 1536 维
+
+### 5.2 LLMProvider
+
+```python
+class LLMProvider(ABC):
+    @abstractmethod
+    async def chat(self, messages: list[dict], temperature=0.7, max_tokens=1024) -> str: ...
+```
+
+内置实现：
+- `OpenAILLM`: 兼容 OpenAI 和 DeepSeek API
+
+用于 `MemoryExtractionService` 从对话中分类提取记忆。
+
+### 5.3 ObjectStorage
+
+```python
+class ObjectStorage(ABC):
+    async def init(self) -> None: ...
+    async def upload(self, prefix, filename, data, content_type) -> str: ...
+    async def download(self, object_key) -> bytes: ...
+    async def delete(self, object_key) -> None: ...
+    async def get_presigned_url(self, object_key, expires_in=3600) -> str: ...
+```
+
+内置实现：
+- `S3Storage`: 使用 boto3，兼容 MinIO / AWS S3 / 华为云 OBS
+
+### 5.4 自定义 Provider
+
+实现 ABC 接口即可：
+
+```python
+from neuromemory.providers.embedding import EmbeddingProvider
+
+class MyEmbedding(EmbeddingProvider):
+    @property
+    def dims(self) -> int:
+        return 768
+
+    async def embed(self, text: str) -> list[float]:
+        # 调用你的 embedding 服务
+        return await my_api.embed(text)
+
+nm = NeuroMemory(database_url="...", embedding=MyEmbedding())
 ```
 
 ---
 
-## 5. 认证与多租户
+## 6. 服务层
 
-### 5.1 认证流程
+每个 Service 接收 `db session` 和 Provider 作为构造参数：
 
-```
-客户端                    API Server                数据库
-  │                          │                       │
-  │  POST /v1/tenants/register                      │
-  │ ─────────────────────────>│                      │
-  │                          │  INSERT INTO tenants │
-  │                          │ ─────────────────────>│
-  │                          │  生成 API Key         │
-  │                          │  (nm_xxxxxxxx)       │
-  │                          │  存储 SHA-256 哈希    │
-  │                          │ ─────────────────────>│
-  │  { api_key: "nm_xxx" }  │                       │
-  │ <─────────────────────────│                      │
-  │                          │                       │
-  │  GET /v1/preferences     │                       │
-  │  Authorization: Bearer nm_xxx                    │
-  │ ─────────────────────────>│                      │
-  │                          │  验证 API Key 哈希    │
-  │                          │ ─────────────────────>│
-  │                          │  返回 tenant_id       │
-  │                          │ <─────────────────────│
-  │                          │  注入依赖: tenant_id  │
-  │                          │  执行业务逻辑         │
-  │  { preferences: [...] }  │                       │
-  │ <─────────────────────────│                      │
-```
-
-### 5.2 API Key 生成
-
-```python
-import secrets
-import hashlib
-
-# 生成 API Key
-raw_key = f"nm_{secrets.token_urlsafe(32)}"  # nm_xxxxxx (43 字符)
-
-# 存储哈希
-key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-
-# 客户端收到原始 key，服务端只存储哈希
-```
-
----
-
-## 6. API 设计
-
-### 6.1 API 版本管理
-
-- **URL 前缀**: `/v1/`（当前版本）
-- **未来扩展**: `/v2/`（破坏性变更时引入）
-
-### 6.2 核心端点
-
-#### 租户注册
-```http
-POST /v1/tenants/register
-Content-Type: application/json
-
-{
-  "name": "MyCompany",
-  "email": "admin@example.com"
-}
-
-Response 200:
-{
-  "tenant_id": "uuid",
-  "api_key": "nm_xxxxxx",
-  "message": "Registration successful"
-}
-```
-
-#### 偏好管理
-```http
-# 设置偏好
-POST /v1/preferences
-Authorization: Bearer nm_xxx
-
-{
-  "user_id": "alice",
-  "key": "language",
-  "value": "zh-CN"
-}
-
-# 查询偏好
-GET /v1/preferences?user_id=alice&key=language
-
-# 列出所有偏好
-GET /v1/preferences?user_id=alice
-
-# 删除偏好
-DELETE /v1/preferences/language?user_id=alice
-```
-
-#### 记忆添加
-```http
-POST /v1/memories
-Authorization: Bearer nm_xxx
-
-{
-  "user_id": "alice",
-  "content": "I work at ABC Company as a software engineer",
-  "memory_type": "fact",
-  "metadata": {"source": "conversation"}
-}
-
-Response 200:
-{
-  "id": "uuid",
-  "user_id": "alice",
-  "content": "...",
-  "memory_type": "fact",
-  "created_at": "2026-02-10T08:00:00Z"
-}
-```
-
-#### 语义检索
-```http
-POST /v1/search
-Authorization: Bearer nm_xxx
-
-{
-  "user_id": "alice",
-  "query": "Where does Alice work?",
-  "limit": 5,
-  "memory_type": "fact",
-  "created_after": "2026-01-01T00:00:00Z"
-}
-
-Response 200:
-{
-  "results": [
-    {
-      "id": "uuid",
-      "content": "I work at ABC Company as a software engineer",
-      "similarity": 0.89,
-      "created_at": "2026-02-10T08:00:00Z"
-    }
-  ]
-}
-```
-
-#### 时间范围查询
-```http
-POST /v1/memories/time-range
-Authorization: Bearer nm_xxx
-
-{
-  "user_id": "alice",
-  "start_time": "2026-01-01T00:00:00Z",
-  "end_time": "2026-01-31T23:59:59Z",
-  "memory_type": "fact",
-  "limit": 50,
-  "offset": 0
-}
-
-Response 200:
-{
-  "user_id": "alice",
-  "total": 123,
-  "limit": 50,
-  "offset": 0,
-  "time_range": {
-    "start": "2026-01-01T00:00:00Z",
-    "end": "2026-01-31T23:59:59Z"
-  },
-  "memories": [...]
-}
-```
-
-完整 API 文档见 [API_REFERENCE.md](API_REFERENCE.md)。
+| 服务 | 依赖 | 功能 |
+|------|------|------|
+| `SearchService` | session, embedding | 向量检索、记忆添加 |
+| `KVService` | session | 键值 CRUD、batch 操作 |
+| `ConversationService` | session | 会话消息管理 |
+| `MemoryService` | session | 时间范围/时间线查询 |
+| `FileService` | session, embedding, storage | 文件上传、文本提取 |
+| `GraphService` | session | 图节点/边 CRUD、Cypher 查询 |
+| `MemoryExtractionService` | session, embedding, llm | LLM 记忆分类提取 |
 
 ---
 
 ## 7. 部署架构
 
-### 7.1 本地开发
+### 7.1 开发环境
 
-```yaml
-# docker-compose.v2.yml
-services:
-  db:
-    image: pgvector/pgvector:pg16
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: neuromemory
-      POSTGRES_PASSWORD: neuromemory
-      POSTGRES_DB: neuromemory
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  api:
-    build: .
-    ports:
-      - "8765:8765"
-    environment:
-      DATABASE_URL: postgresql+asyncpg://neuromemory:neuromemory@db:5432/neuromemory
-      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
-    depends_on:
-      - db
-```
-
-启动：
 ```bash
 docker compose -f docker-compose.v2.yml up -d
 ```
 
-### 7.2 生产部署
+提供：
+- PostgreSQL（含 pgvector + AGE）: `localhost:5432`
+- MinIO（可选）: `localhost:9000`（Console: `localhost:9001`）
 
-**推荐架构**:
+### 7.2 生产环境
+
 ```
-                    ┌─────────────────┐
-                    │   Load Balancer │
-                    │   (Nginx/ALB)   │
-                    └────────┬────────┘
-                             │
-         ┌───────────────────┼───────────────────┐
-         │                   │                   │
-    ┌────▼─────┐      ┌─────▼──────┐     ┌─────▼──────┐
-    │ API Pod 1│      │ API Pod 2  │ ... │ API Pod N  │
-    │ (FastAPI)│      │ (FastAPI)  │     │ (FastAPI)  │
-    └────┬─────┘      └─────┬──────┘     └─────┬──────┘
-         │                   │                   │
-         └───────────────────┼───────────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │   PostgreSQL    │
-                    │   (RDS/Cloud)   │
-                    │   + pgvector    │
-                    └─────────────────┘
+┌───────────────────────────────┐
+│  Your Agent Application       │
+│  ┌─────────────────────────┐ │
+│  │  NeuroMemory Framework  │ │
+│  └───────────┬─────────────┘ │
+└──────────────┼───────────────┘
+               │
+    ┌──────────▼───────────┐
+    │  PostgreSQL (RDS)    │
+    │  + pgvector + AGE    │
+    └──────────────────────┘
+               │
+    ┌──────────▼───────────┐
+    │  S3 / MinIO / OBS    │  (可选，用于文件存储)
+    └──────────────────────┘
 ```
 
-**环境变量**:
-```bash
-DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db
-SILICONFLOW_API_KEY=sk-xxx
-LOG_LEVEL=INFO
-```
+NeuroMemory 作为库嵌入你的应用，不需要独立部署。只需确保：
+1. PostgreSQL 可访问
+2. Embedding API 可用
+3. S3 存储可访问（如果使用文件功能）
 
 ---
 
-## 8. v1 迁移说明
-
-### 8.1 架构对比
-
-| 组件 | v1 | v2 | 迁移策略 |
-|------|----|----|----------|
-| 向量存储 | Qdrant | PostgreSQL + pgvector | 导出向量数据，重新导入 |
-| 图存储 | Neo4j | PostgreSQL (jsonb) | 暂不支持，未来考虑 AGE 扩展 |
-| 认证 | 无 | API Key 多租户 | 创建租户，分配 API Key |
-| 会话管理 | SessionManager | 移除 | 客户端自行管理上下文 |
-| LLM 集成 | Mem0 + LangChain | 移除 | 客户端使用 LLM SDK |
-
-### 8.2 不兼容变更
-
-1. **移除 Neo4j 知识图谱**: v2 专注向量检索，不支持图遍历
-2. **移除 Mem0 集成**: v2 是纯存储服务，不包含 LLM 推理
-3. **API 端点变更**: v1 的 `/process` 端点在 v2 中拆分为 `/memories` 和 `/search`
-4. **认证机制**: v2 强制要求 API Key 认证
-
-### 8.3 迁移建议
-
-**如果你依赖 v1 的知识图谱功能**:
-- 保留 v1 部署，或等待 v2 的 AGE 图数据库支持（Phase 2）
-
-**如果你只使用向量检索**:
-- 可以迁移到 v2，性能更好，部署更简单
-
----
-
-## 附录
-
-### A. 性能指标
-
-| 操作 | 延迟 (P50) | 延迟 (P99) | 吞吐量 |
-|------|-----------|-----------|--------|
-| 添加记忆 | 50ms | 150ms | 1000 req/s |
-| 语义检索 | 30ms | 100ms | 2000 req/s |
-| 偏好查询 | 5ms | 20ms | 5000 req/s |
-
-**测试环境**: PostgreSQL 16, 8 vCPU, 32GB RAM, NVMe SSD
-
-### B. 安全考虑
-
-1. **SQL 注入防护**: 使用 SQLAlchemy 参数化查询
-2. **API Key 哈希**: SHA-256 单向哈希，不可逆
-3. **多租户隔离**: 所有查询强制包含 `tenant_id`
-4. **输入验证**: Pydantic 模型验证所有输入
-5. **HTTPS 强制**: 生产环境禁用 HTTP
-
-### C. 参考资料
-
-- [FastAPI 官方文档](https://fastapi.tiangolo.com)
-- [SQLAlchemy 2.0 文档](https://docs.sqlalchemy.org/en/20/)
-- [pgvector GitHub](https://github.com/pgvector/pgvector)
-- [PostgreSQL 官方文档](https://www.postgresql.org/docs/16/)
-
----
-
-**文档维护**: 本文档随 v2 代码同步更新。如有问题，请提交 Issue。
+**文档维护**: 本文档随代码同步更新。如有问题，请提交 Issue。

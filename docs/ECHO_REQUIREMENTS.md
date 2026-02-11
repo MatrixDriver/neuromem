@@ -416,7 +416,7 @@ ON learning_progress(tenant_id, user_id, skill_id);
 - [ ] 编写测试
 
 **交付物**：
-- `sdk/neuromemory_client/files.py` (更新)
+- `sdk/neuromemory/files.py` (更新)
 - `tests/v2/test_files.py`
 
 ---
@@ -442,7 +442,7 @@ ON learning_progress(tenant_id, user_id, skill_id);
 - [ ] 编写测试
 
 **交付物**：
-- `sdk/neuromemory_client/memory.py` (更新)
+- `sdk/neuromemory/memory.py` (更新)
 - `tests/v2/test_memory_time.py`
 
 ---
@@ -476,7 +476,7 @@ ON learning_progress(tenant_id, user_id, skill_id);
 - [ ] 文档和示例
 
 **交付物**：
-- `sdk/neuromemory_client/graph.py` (完善)
+- `sdk/neuromemory/graph.py` (完善)
 - `tests/v2/test_graph.py`
 
 ---
@@ -510,7 +510,7 @@ ON learning_progress(tenant_id, user_id, skill_id);
 - [ ] 编写测试
 
 **交付物**：
-- `sdk/neuromemory_client/progress.py`
+- `sdk/neuromemory/progress.py`
 - `tests/v2/test_progress.py`
 
 ---

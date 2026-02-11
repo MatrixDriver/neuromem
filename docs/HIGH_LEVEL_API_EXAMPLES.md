@@ -4,7 +4,7 @@
 
 ### 底层 API（现有）
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemoryClient
 
 client = NeuroMemoryClient(api_key="nm_xxx")
 
@@ -24,7 +24,7 @@ client.preferences.set(
 
 ### 高层 API（新增）
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemoryClient
 
 client = NeuroMemoryClient(api_key="nm_xxx")
 
@@ -47,7 +47,7 @@ client.conversations.add_message(
 ## 完整示例 1: 智能聊天机器人
 
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemoryClient
 from anthropic import Anthropic
 
 class SmartChatbot:
@@ -129,7 +129,7 @@ print(bot.chat("user1", "推荐一个适合我的编辑器主题"))
 ## 完整示例 2: 知识库助手
 
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemoryClient
 
 class KnowledgeAssistant:
     def __init__(self, api_key: str):
@@ -216,7 +216,7 @@ print(answer)
 ## 完整示例 3: 个人助理 Agent
 
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemoryClient
 from datetime import datetime
 
 class PersonalAssistant:
@@ -322,7 +322,7 @@ assistant.get_profile()
 ## 完整示例 4: Multi-Agent 协作系统
 
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemoryClient
 
 class AgentTeam:
     def __init__(self, api_key: str):
@@ -424,7 +424,7 @@ for agent_id, info in results.items():
 ## 完整示例 5: 文档问答系统
 
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemoryClient
 
 class DocQA:
     def __init__(self, api_key: str):

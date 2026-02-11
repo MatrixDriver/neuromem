@@ -1,760 +1,579 @@
-# NeuroMemory Python SDK 使用指南
+# NeuroMemory 使用指南
 
-> **版本**: v2.0
 > **Python 版本**: 3.10+
-> **最后更新**: 2026-02-10
+> **最后更新**: 2026-02-11
 
 ---
 
 ## 目录
 
 1. [安装](#1-安装)
-2. [快速开始](#2-快速开始)
-3. [客户端初始化](#3-客户端初始化)
-4. [偏好管理](#4-偏好管理)
-5. [记忆管理](#5-记忆管理)
-6. [语义检索](#6-语义检索)
-7. [时间查询](#7-时间查询)
-8. [错误处理](#8-错误处理)
-9. [高级用法](#9-高级用法)
+2. [初始化](#2-初始化)
+3. [语义记忆](#3-语义记忆)
+4. [KV 存储](#4-kv-存储)
+5. [对话管理](#5-对话管理)
+6. [文件管理](#6-文件管理)
+7. [图数据库](#7-图数据库)
+8. [记忆提取](#8-记忆提取)
+9. [时间查询](#9-时间查询)
+10. [错误处理](#10-错误处理)
+11. [自定义 Provider](#11-自定义-provider)
 
 ---
 
 ## 1. 安装
 
-### 1.1 从 PyPI 安装（推荐）
-
 ```bash
-pip install neuromemory-client
+# 核心依赖
+pip install -e .
+
+# 全部可选依赖
+pip install -e ".[all]"
 ```
 
-### 1.2 从源码安装
-
+依赖 PostgreSQL（含 pgvector）：
 ```bash
-# 克隆仓库
-git clone https://github.com/your-repo/NeuroMemory.git
-cd NeuroMemory
-
-# 安装 SDK（开发模式）
-pip install -e sdk/
-```
-
-### 1.3 依赖项
-
-SDK 依赖以下库：
-- `httpx >= 0.25.0` - HTTP 客户端
-- `pydantic >= 2.0.0` - 数据验证
-
----
-
-## 2. 快速开始
-
-### 2.1 获取 API Key
-
-首先需要注册租户并获取 API Key：
-
-```python
-import httpx
-
-response = httpx.post(
-    "http://localhost:8765/v1/tenants/register",
-    json={
-        "name": "MyCompany",
-        "email": "admin@example.com"
-    }
-)
-data = response.json()
-api_key = data["api_key"]  # 保存此 Key
-print(f"Your API Key: {api_key}")
-```
-
-### 2.2 基础示例
-
-```python
-from neuromemory_client import NeuroMemoryClient
-
-# 初始化客户端
-client = NeuroMemoryClient(
-    api_key="nm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    base_url="http://localhost:8765"
-)
-
-# 设置用户偏好
-client.preferences.set(
-    user_id="alice",
-    key="language",
-    value="zh-CN"
-)
-
-# 添加记忆
-client.add_memory(
-    user_id="alice",
-    content="I work at ABC Company as a software engineer",
-    memory_type="fact"
-)
-
-# 语义检索
-results = client.search(
-    user_id="alice",
-    query="Where does Alice work?",
-    limit=5
-)
-
-print(results)
+docker compose -f docker-compose.v2.yml up -d db
 ```
 
 ---
 
-## 3. 客户端初始化
+## 2. 初始化
 
-### 3.1 基础初始化
+### 2.1 基础初始化
 
 ```python
-from neuromemory_client import NeuroMemoryClient
+from neuromemory import NeuroMemory, SiliconFlowEmbedding
 
-client = NeuroMemoryClient(
-    api_key="nm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    base_url="http://localhost:8765",  # API 地址
-    timeout=30.0  # 请求超时时间（秒）
+nm = NeuroMemory(
+    database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
+    embedding=SiliconFlowEmbedding(api_key="your-key"),
+)
+await nm.init()   # 创建表、初始化扩展
+
+# 使用...
+
+await nm.close()  # 关闭连接池
+```
+
+### 2.2 上下文管理器（推荐）
+
+```python
+async with NeuroMemory(
+    database_url="postgresql+asyncpg://...",
+    embedding=SiliconFlowEmbedding(api_key="..."),
+) as nm:
+    await nm.add_memory(user_id="alice", content="Hello")
+    # 自动调用 init() 和 close()
+```
+
+### 2.3 完整配置
+
+```python
+from neuromemory import (
+    NeuroMemory,
+    SiliconFlowEmbedding,
+    OpenAILLM,
+    S3Storage,
+)
+
+nm = NeuroMemory(
+    database_url="postgresql+asyncpg://user:pass@host:5432/db",
+    embedding=SiliconFlowEmbedding(api_key="..."),
+    llm=OpenAILLM(                          # 可选：记忆提取
+        api_key="...",
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+    ),
+    storage=S3Storage(                       # 可选：文件存储
+        endpoint="http://localhost:9000",
+        access_key="neuromemory",
+        secret_key="neuromemory123",
+        bucket="neuromemory",
+    ),
+    pool_size=20,                            # 数据库连接池大小
 )
 ```
 
-### 3.2 参数说明
+### 2.4 参数说明
 
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
-|------|------|------|--------|------|
-| api_key | str | 是 | - | API 密钥（nm_ 开头） |
-| base_url | str | 否 | http://localhost:8765 | API 基础地址 |
-| timeout | float | 否 | 30.0 | 请求超时时间（秒） |
-
-### 3.3 上下文管理器
-
-推荐使用 `with` 语句自动关闭连接：
-
-```python
-with NeuroMemoryClient(api_key="nm_xxx") as client:
-    client.preferences.set(user_id="alice", key="lang", value="en")
-    # 离开 with 块时自动调用 client.close()
-```
-
-手动管理连接：
-
-```python
-client = NeuroMemoryClient(api_key="nm_xxx")
-try:
-    # 使用客户端
-    pass
-finally:
-    client.close()  # 关闭 HTTP 连接
-```
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| database_url | str | 是 | PostgreSQL 连接字符串 |
+| embedding | EmbeddingProvider | 是 | Embedding 服务 |
+| llm | LLMProvider | 否 | LLM 服务（记忆提取需要） |
+| storage | ObjectStorage | 否 | 文件存储（文件功能需要） |
+| pool_size | int | 否 | 连接池大小（默认 10） |
 
 ---
 
-## 4. 偏好管理
+## 3. 语义记忆
 
-偏好用于存储用户的配置和设置（如语言、主题、通知偏好等）。
-
-### 4.1 设置偏好
-
-```python
-# 字符串值
-client.preferences.set(
-    user_id="alice",
-    key="language",
-    value="zh-CN"
-)
-
-# 数字值
-client.preferences.set(
-    user_id="alice",
-    key="notification_interval",
-    value=3600
-)
-
-# 对象值（会转换为 JSON）
-client.preferences.set(
-    user_id="alice",
-    key="theme",
-    value={
-        "mode": "dark",
-        "primary_color": "#007bff",
-        "font_size": 14
-    }
-)
-```
-
-### 4.2 获取偏好
-
-```python
-# 获取单个偏好
-pref = client.preferences.get(user_id="alice", key="language")
-print(pref["value"])  # "zh-CN"
-
-# 列出所有偏好
-all_prefs = client.preferences.list(user_id="alice")
-for pref in all_prefs:
-    print(f"{pref['key']}: {pref['value']}")
-```
-
-### 4.3 删除偏好
-
-```python
-client.preferences.delete(user_id="alice", key="language")
-```
-
-### 4.4 偏好响应格式
-
-```python
-{
-    "id": "uuid",
-    "user_id": "alice",
-    "key": "language",
-    "value": "zh-CN",
-    "created_at": "2026-02-10T08:00:00Z",
-    "updated_at": "2026-02-10T08:00:00Z"
-}
-```
-
----
-
-## 5. 记忆管理
-
-### 5.1 添加记忆
+### 3.1 添加记忆
 
 ```python
 # 基础用法
-memory = client.add_memory(
+embedding = await nm.add_memory(
     user_id="alice",
-    content="I work at ABC Company as a software engineer"
+    content="I work at ABC Company as a software engineer",
 )
 
-# 带记忆类型
-memory = client.add_memory(
+# 带类型和元数据
+embedding = await nm.add_memory(
     user_id="alice",
-    content="My favorite color is blue",
-    memory_type="preference"
-)
-
-# 带元数据
-memory = client.add_memory(
-    user_id="alice",
-    content="Attended team meeting on 2026-02-10",
+    content="Attended team meeting on project planning",
     memory_type="episodic",
-    metadata={
-        "source": "calendar",
-        "event_type": "meeting",
-        "participants": ["bob", "charlie"]
-    }
+    metadata={"date": "2026-02-10", "participants": ["bob"]},
 )
 ```
 
-### 5.2 记忆类型建议
+记忆类型建议：
 
 | 类型 | 说明 | 示例 |
 |------|------|------|
 | `fact` | 事实性知识 | "Python 是一种编程语言" |
 | `episodic` | 事件记录 | "昨天参加了项目会议" |
 | `preference` | 用户偏好 | "我喜欢喝咖啡" |
-| `general` | 通用记忆（默认） | 其他类型的记忆 |
+| `document` | 文档内容 | 自动从文件提取 |
+| `general` | 通用（默认） | 其他 |
 
-### 5.3 记忆响应格式
+### 3.2 语义检索
+
+```python
+# 基础检索
+results = await nm.search(
+    user_id="alice",
+    query="Where does Alice work?",
+)
+
+# 带过滤
+results = await nm.search(
+    user_id="alice",
+    query="meetings",
+    memory_type="episodic",
+    limit=10,
+)
+
+# 结果格式
+for r in results:
+    print(f"[{r['similarity']:.2f}] {r['content']}")
+    # r['id'], r['memory_type'], r['metadata'], r['created_at']
+```
+
+---
+
+## 4. KV 存储
+
+通用键值存储，按 `namespace + scope_id + key` 隔离。
+
+### 4.1 基础 CRUD
+
+```python
+# 设置（支持任意 JSON 值）
+await nm.kv.set("preferences", "alice", "language", "zh-CN")
+await nm.kv.set("preferences", "alice", "theme", {"mode": "dark"})
+await nm.kv.set("settings", "global", "max_tokens", 4096)
+
+# 获取
+value = await nm.kv.get("preferences", "alice", "language")
+# 返回 "zh-CN"，不存在返回 None
+
+# 删除
+deleted = await nm.kv.delete("preferences", "alice", "language")
+# 返回 True/False
+```
+
+### 4.2 列出和批量操作
+
+```python
+# 列出 namespace + scope 下所有键值
+items = await nm.kv.list("preferences", "alice")
+for item in items:
+    print(f"{item.key}: {item.value}")
+
+# 按前缀过滤
+items = await nm.kv.list("preferences", "alice", prefix="theme")
+
+# 批量设置
+await nm.kv.batch_set("preferences", "alice", {
+    "language": "zh-CN",
+    "theme": {"mode": "dark"},
+    "font_size": 14,
+})
+```
+
+---
+
+## 5. 对话管理
+
+### 5.1 添加消息
+
+```python
+# 单条消息（自动生成 session_id）
+msg = await nm.conversations.add_message(
+    user_id="alice",
+    role="user",
+    content="Hello!",
+)
+print(msg.session_id)  # session_xxxx
+
+# 指定 session
+msg = await nm.conversations.add_message(
+    user_id="alice",
+    role="assistant",
+    content="Hi! How can I help?",
+    session_id="my_session_001",
+)
+```
+
+### 5.2 批量添加
+
+```python
+session_id, message_ids = await nm.conversations.add_messages_batch(
+    user_id="alice",
+    messages=[
+        {"role": "user", "content": "What's the weather?"},
+        {"role": "assistant", "content": "It's sunny today!"},
+        {"role": "user", "content": "Great, thanks!"},
+    ],
+    session_id="weather_chat",
+)
+```
+
+### 5.3 查询
+
+```python
+# 获取会话历史
+messages = await nm.conversations.get_history(
+    user_id="alice",
+    session_id="my_session_001",
+    limit=50,
+)
+
+# 列出所有会话
+total, sessions = await nm.conversations.list_sessions(
+    user_id="alice",
+    limit=20,
+)
+for s in sessions:
+    print(f"Session {s.session_id}: {s.message_count} messages")
+```
+
+---
+
+## 6. 文件管理
+
+需要配置 `S3Storage`。
+
+### 6.1 上传文件
+
+```python
+# 上传文件（自动提取文本 + 生成 embedding）
+doc = await nm.files.upload(
+    user_id="alice",
+    filename="report.pdf",
+    file_data=open("report.pdf", "rb").read(),
+    category="work",
+    tags=["quarterly", "finance"],
+    auto_extract=True,  # 默认 True
+)
+
+print(f"ID: {doc.id}")
+print(f"Extracted: {len(doc.extracted_text or '')} chars")
+```
+
+### 6.2 从文本创建文档
+
+```python
+doc = await nm.files.create_from_text(
+    user_id="alice",
+    title="Meeting Notes",
+    content="Today we discussed the Q1 roadmap...",
+    category="notes",
+)
+```
+
+### 6.3 查询和删除
+
+```python
+# 列出文件
+docs = await nm.files.list_documents(
+    user_id="alice",
+    category="work",
+    file_types=["pdf", "docx"],
+)
+
+# 获取单个文件
+doc = await nm.files.get_document(file_id=some_uuid)
+
+# 删除文件（同时删除存储和数据库记录）
+await nm.files.delete(file_id=some_uuid)
+```
+
+### 6.4 支持的文件类型
+
+| 类型 | 扩展名 | 文本提取 |
+|------|--------|---------|
+| 文本 | .txt, .md, .json, .yaml, .csv, .html, .xml | 直接读取 |
+| 代码 | .py, .js, .ts, .java, .go, .sql, .sh | 直接读取 |
+| PDF | .pdf | pypdf |
+| Word | .docx | python-docx |
+| 图片 | .png, .jpg, .gif, .webp | 仅存储，不提取 |
+
+---
+
+## 7. 图数据库
+
+基于 Apache AGE，支持 Cypher 查询。
+
+### 7.1 节点和关系类型
+
+```python
+from neuromemory.models.graph import NodeType, EdgeType
+
+# 内置节点类型
+NodeType.USER      # 用户
+NodeType.MEMORY    # 记忆
+NodeType.TOPIC     # 主题
+NodeType.ENTITY    # 实体
+
+# 内置关系类型
+EdgeType.HAS_MEMORY     # 拥有记忆
+EdgeType.RELATED_TO     # 相关
+EdgeType.INTERESTED_IN  # 感兴趣
+EdgeType.MENTIONED_IN   # 被提及
+```
+
+### 7.2 节点 CRUD
+
+```python
+# 创建节点
+node = await nm.graph.create_node(
+    NodeType.USER, "alice",
+    properties={"name": "Alice", "age": 30},
+    user_id="alice",
+)
+
+# 获取节点
+node = await nm.graph.get_node(NodeType.USER, "alice")
+
+# 更新节点
+await nm.graph.update_node(NodeType.USER, "alice", {"age": 31})
+
+# 删除节点（同时删除相关边）
+await nm.graph.delete_node(NodeType.USER, "alice")
+```
+
+### 7.3 关系 CRUD
+
+```python
+# 创建关系
+edge = await nm.graph.create_edge(
+    NodeType.USER, "alice",
+    EdgeType.INTERESTED_IN,
+    NodeType.TOPIC, "python",
+    properties={"since": "2020"},
+)
+
+# 更新关系
+await nm.graph.update_edge(
+    NodeType.USER, "alice",
+    EdgeType.INTERESTED_IN,
+    NodeType.TOPIC, "python",
+    {"level": "expert"},
+)
+
+# 删除关系
+await nm.graph.delete_edge(
+    NodeType.USER, "alice",
+    EdgeType.INTERESTED_IN,
+    NodeType.TOPIC, "python",
+)
+```
+
+### 7.4 查询
+
+```python
+# 获取邻居
+neighbors = await nm.graph.get_neighbors(
+    NodeType.USER, "alice",
+    edge_types=[EdgeType.INTERESTED_IN],
+    direction="out",
+    limit=10,
+)
+
+# 查找路径
+path = await nm.graph.find_path(
+    NodeType.USER, "alice",
+    NodeType.TOPIC, "machine-learning",
+    max_depth=3,
+)
+
+# 自定义 Cypher
+results = await nm.graph.query(
+    "MATCH (u:User)-[:INTERESTED_IN]->(t:Topic) RETURN t",
+    params={},
+)
+```
+
+---
+
+## 8. 记忆提取
+
+需要配置 `LLMProvider`。从对话中自动提取偏好、事实和事件。
+
+### 8.1 基础用法
+
+```python
+from neuromemory import OpenAILLM
+
+nm = NeuroMemory(
+    database_url="...",
+    embedding=SiliconFlowEmbedding(api_key="..."),
+    llm=OpenAILLM(api_key="...", model="deepseek-chat"),
+)
+
+# 先录入对话
+await nm.conversations.add_messages_batch(
+    user_id="alice",
+    messages=[
+        {"role": "user", "content": "I just started working at Google as a ML engineer"},
+        {"role": "assistant", "content": "That's great!"},
+        {"role": "user", "content": "I prefer Python over Java for ML work"},
+    ],
+)
+
+# 提取记忆
+stats = await nm.extract_memories(user_id="alice")
+```
+
+### 8.2 提取结果
 
 ```python
 {
-    "id": "uuid",
-    "user_id": "alice",
-    "content": "...",
-    "memory_type": "fact",
-    "metadata": {...},
-    "created_at": "2026-02-10T08:00:00Z"
+    "preferences_extracted": 1,   # 存入 KV（key: "preferred_language", value: "Python"）
+    "facts_extracted": 1,         # 存入 embeddings（content: "在 Google 担任 ML 工程师"）
+    "episodes_extracted": 0,
+    "messages_processed": 3,
 }
 ```
 
 ---
 
-## 6. 语义检索
+## 9. 时间查询
 
-### 6.1 基础检索
-
-```python
-# 简单查询
-results = client.search(
-    user_id="alice",
-    query="Where does Alice work?"
-)
-
-for result in results:
-    print(f"[{result['similarity']:.2f}] {result['content']}")
-```
-
-### 6.2 限制结果数量
-
-```python
-results = client.search(
-    user_id="alice",
-    query="work",
-    limit=3  # 最多返回 3 条结果
-)
-```
-
-### 6.3 按类型过滤
-
-```python
-results = client.search(
-    user_id="alice",
-    query="preferences",
-    memory_type="preference"  # 只搜索偏好类型
-)
-```
-
-### 6.4 时间范围过滤
+### 9.1 时间范围查询
 
 ```python
 from datetime import datetime, timezone
 
-results = client.search(
-    user_id="alice",
-    query="meetings",
-    created_after=datetime(2026, 1, 1, tzinfo=timezone.utc),
-    created_before=datetime(2026, 2, 1, tzinfo=timezone.utc)
-)
-```
-
-### 6.5 完整示例
-
-```python
-from datetime import datetime, timezone
-
-results = client.search(
-    user_id="alice",
-    query="project discussions",
-    limit=10,
-    memory_type="episodic",
-    created_after=datetime(2026, 1, 1, tzinfo=timezone.utc)
-)
-
-print(f"Found {len(results)} results:\n")
-for i, result in enumerate(results, 1):
-    print(f"{i}. [{result['similarity']:.3f}] {result['content']}")
-    print(f"   Created: {result['created_at']}\n")
-```
-
-### 6.6 检索响应格式
-
-```python
-[
-    {
-        "id": "uuid",
-        "user_id": "alice",
-        "content": "I work at ABC Company",
-        "memory_type": "fact",
-        "metadata": {...},
-        "created_at": "2026-02-10T08:00:00Z",
-        "similarity": 0.89  # 相似度分数 (0-1)
-    }
-]
-```
-
----
-
-## 7. 时间查询
-
-### 7.1 时间范围查询
-
-查询指定时间区间内的所有记忆：
-
-```python
-from datetime import datetime, timezone
-
-result = client.memory.get_by_time_range(
+result = await nm.get_memories_by_time_range(
     user_id="alice",
     start_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
     end_time=datetime(2026, 1, 31, 23, 59, 59, tzinfo=timezone.utc),
     memory_type="fact",
     limit=50,
-    offset=0
 )
-
-print(f"Total: {result['total']} memories")
-print(f"Showing: {len(result['memories'])} memories")
-
-for memory in result['memories']:
-    print(f"- {memory['content']}")
 ```
 
-### 7.2 最近记忆查询
-
-便捷方法，查询最近 N 天的记忆：
+### 9.2 最近记忆
 
 ```python
-# 最近 7 天的记忆
-memories = client.get_recent_memories(
+memories = await nm.get_recent_memories(
     user_id="alice",
     days=7,
-    limit=50
-)
-
-# 最近 30 天的特定类型记忆
-memories = client.get_recent_memories(
-    user_id="alice",
-    days=30,
     memory_types=["fact", "episodic"],
-    limit=100
+    limit=50,
 )
 ```
 
-或使用 MemoryClient：
-
-```python
-memories = client.memory.get_recent(
-    user_id="alice",
-    days=7,
-    memory_types=["fact"],
-    limit=50
-)
-```
-
-### 7.3 时间线聚合
-
-按日/周/月统计记忆数量：
+### 9.3 时间线统计
 
 ```python
 from datetime import date
 
-# 按日统计
-timeline = client.get_memory_timeline(
+stats = await nm.get_memory_timeline(
     user_id="alice",
     start_date=date(2026, 1, 1),
     end_date=date(2026, 1, 31),
-    granularity="day"
-)
-
-print(f"Total memories: {timeline['total_memories']}")
-for stat in timeline['data']:
-    print(f"{stat['date']}: {stat['count']} memories")
-    print(f"  Types: {stat['memory_types']}")
-```
-
-或使用 MemoryClient：
-
-```python
-timeline = client.memory.get_timeline(
-    user_id="alice",
-    start_date=date(2026, 1, 1),
-    end_date=date(2026, 1, 31),
-    granularity="week"  # day, week, month
+    granularity="day",  # day, week, month
 )
 ```
 
 ---
 
-## 8. 错误处理
-
-### 8.1 HTTP 错误
-
-SDK 使用 `httpx` 库，错误通过异常抛出：
+## 10. 错误处理
 
 ```python
-import httpx
-
 try:
-    result = client.search(
-        user_id="alice",
-        query="test"
-    )
-except httpx.HTTPStatusError as e:
-    print(f"HTTP Error: {e.response.status_code}")
-    print(f"Detail: {e.response.json()['detail']}")
-except httpx.RequestError as e:
-    print(f"Request Error: {e}")
+    await nm.add_memory(user_id="alice", content="test")
+except Exception as e:
+    # 数据库连接错误、Embedding API 错误等
+    print(f"Error: {e}")
 ```
 
-### 8.2 常见错误处理
+常见错误：
+
+| 错误 | 原因 | 解决 |
+|------|------|------|
+| `ConnectionRefusedError` | PostgreSQL 未启动 | 启动 Docker 容器 |
+| `ValueError: Storage not configured` | 未配置 S3Storage | 传入 storage 参数 |
+| `ValueError: LLM not configured` | 未配置 LLMProvider | 传入 llm 参数 |
+| `httpx.HTTPStatusError` | Embedding API 错误 | 检查 API Key |
+
+---
+
+## 11. 自定义 Provider
+
+### 11.1 自定义 Embedding
 
 ```python
-from datetime import datetime, timezone
-import httpx
+from neuromemory.providers.embedding import EmbeddingProvider
 
-try:
-    # 可能抛出异常的操作
-    result = client.memory.get_by_time_range(
-        user_id="alice",
-        start_time=datetime(2026, 2, 1, tzinfo=timezone.utc),
-        end_time=datetime(2026, 1, 1, tzinfo=timezone.utc)  # 错误：结束时间早于开始时间
-    )
-except httpx.HTTPStatusError as e:
-    if e.response.status_code == 400:
-        print("Invalid parameters:", e.response.json()["detail"])
-    elif e.response.status_code == 401:
-        print("Authentication failed. Check your API key.")
-    elif e.response.status_code == 404:
-        print("Resource not found.")
-    elif e.response.status_code == 500:
-        print("Server error. Please try again later.")
-    else:
-        print(f"Unexpected error: {e}")
-except httpx.RequestError as e:
-    print(f"Connection error: {e}")
+class MyEmbedding(EmbeddingProvider):
+    @property
+    def dims(self) -> int:
+        return 768
+
+    async def embed(self, text: str) -> list[float]:
+        # 你的实现
+        return await my_service.embed(text)
+
+nm = NeuroMemory(database_url="...", embedding=MyEmbedding())
 ```
 
-### 8.3 重试机制
-
-实现简单的重试逻辑：
+### 11.2 自定义 LLM
 
 ```python
-import time
-import httpx
+from neuromemory.providers.llm import LLMProvider
 
-def search_with_retry(client, user_id, query, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            return client.search(user_id=user_id, query=query)
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code >= 500 and attempt < max_retries - 1:
-                print(f"Retry {attempt + 1}/{max_retries} after server error...")
-                time.sleep(2 ** attempt)  # 指数退避
-            else:
-                raise
-        except httpx.RequestError as e:
-            if attempt < max_retries - 1:
-                print(f"Retry {attempt + 1}/{max_retries} after connection error...")
-                time.sleep(2 ** attempt)
-            else:
-                raise
+class MyLLM(LLMProvider):
+    async def chat(self, messages, temperature=0.7, max_tokens=1024):
+        # 你的实现
+        return await my_llm.complete(messages)
+
+nm = NeuroMemory(database_url="...", embedding=..., llm=MyLLM())
+```
+
+### 11.3 自定义 Storage
+
+```python
+from neuromemory.storage.base import ObjectStorage
+
+class MyStorage(ObjectStorage):
+    async def upload(self, prefix, filename, data, content_type):
+        # 你的实现
+        return f"{prefix}/{filename}"
+
+    async def download(self, object_key):
+        ...
+
+    async def delete(self, object_key):
+        ...
+
+nm = NeuroMemory(database_url="...", embedding=..., storage=MyStorage())
 ```
 
 ---
 
-## 9. 高级用法
-
-### 9.1 批量添加记忆
-
-```python
-memories = [
-    {"content": "Python is a programming language", "memory_type": "fact"},
-    {"content": "Java is also a programming language", "memory_type": "fact"},
-    {"content": "I prefer Python over Java", "memory_type": "preference"},
-]
-
-for mem in memories:
-    client.add_memory(
-        user_id="alice",
-        content=mem["content"],
-        memory_type=mem["memory_type"]
-    )
-    print(f"Added: {mem['content']}")
-```
-
-### 9.2 分页查询
-
-```python
-def get_all_memories_in_range(client, user_id, start_time, end_time):
-    """分页获取时间范围内的所有记忆"""
-    all_memories = []
-    offset = 0
-    limit = 100
-
-    while True:
-        result = client.memory.get_by_time_range(
-            user_id=user_id,
-            start_time=start_time,
-            end_time=end_time,
-            limit=limit,
-            offset=offset
-        )
-
-        all_memories.extend(result['memories'])
-
-        if len(result['memories']) < limit:
-            break  # 没有更多数据
-
-        offset += limit
-
-    return all_memories
-
-# 使用
-from datetime import datetime, timezone
-
-all_memories = get_all_memories_in_range(
-    client,
-    user_id="alice",
-    start_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
-    end_time=datetime(2026, 12, 31, tzinfo=timezone.utc)
-)
-print(f"Total: {len(all_memories)} memories")
-```
-
-### 9.3 自定义 HTTP 客户端
-
-如果需要更多控制（如自定义代理、TLS 配置）：
-
-```python
-import httpx
-from neuromemory_client import NeuroMemoryClient
-
-# 创建自定义 httpx 客户端
-http_client = httpx.Client(
-    base_url="http://localhost:8765/v1",
-    headers={"Authorization": "Bearer nm_xxx"},
-    timeout=30.0,
-    proxies="http://proxy.example.com:8080",
-    verify=True  # TLS 验证
-)
-
-# 注意：需要手动管理客户端
-# 当前 SDK 不支持注入自定义 httpx 客户端
-# 这是一个潜在的扩展点
-```
-
-### 9.4 健康检查
-
-在应用启动时检查服务可用性：
-
-```python
-def check_service_health(base_url):
-    """检查 NeuroMemory 服务健康状态"""
-    import httpx
-
-    try:
-        response = httpx.get(f"{base_url}/v1/health", timeout=5.0)
-        response.raise_for_status()
-        health = response.json()
-
-        if health["status"] == "healthy":
-            print("✓ Service is healthy")
-            return True
-        else:
-            print(f"✗ Service is unhealthy: {health}")
-            return False
-    except Exception as e:
-        print(f"✗ Service unavailable: {e}")
-        return False
-
-# 使用
-if check_service_health("http://localhost:8765"):
-    client = NeuroMemoryClient(api_key="nm_xxx")
-    # 继续使用客户端
-else:
-    print("Please start the NeuroMemory service first")
-```
-
-### 9.5 用户记忆概览
-
-获取用户的记忆统计信息：
-
-```python
-overview = client.get_user_memories(user_id="alice")
-
-print(f"User: {overview['user_id']}")
-print(f"Total memories: {overview['total_memories']}")
-print(f"Memory types: {overview['memory_types']}")
-print(f"Date range: {overview['earliest_memory']} to {overview['latest_memory']}")
-```
-
----
-
-## 附录
-
-### A. 完整示例
-
-```python
-from neuromemory_client import NeuroMemoryClient
-from datetime import datetime, date, timezone
-import httpx
-
-def main():
-    # 初始化客户端
-    client = NeuroMemoryClient(
-        api_key="nm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-        base_url="http://localhost:8765"
-    )
-
-    try:
-        # 1. 设置偏好
-        client.preferences.set(
-            user_id="alice",
-            key="language",
-            value="zh-CN"
-        )
-        print("✓ Preference set")
-
-        # 2. 添加记忆
-        memory = client.add_memory(
-            user_id="alice",
-            content="I work at ABC Company as a software engineer",
-            memory_type="fact"
-        )
-        print(f"✓ Memory added: {memory['id']}")
-
-        # 3. 语义检索
-        results = client.search(
-            user_id="alice",
-            query="workplace",
-            limit=5
-        )
-        print(f"✓ Search found {len(results)} results")
-
-        # 4. 时间查询
-        recent = client.get_recent_memories(
-            user_id="alice",
-            days=7
-        )
-        print(f"✓ Recent memories: {len(recent)}")
-
-        # 5. 时间线统计
-        timeline = client.get_memory_timeline(
-            user_id="alice",
-            start_date=date(2026, 2, 1),
-            end_date=date(2026, 2, 10)
-        )
-        print(f"✓ Timeline: {timeline['total_memories']} total")
-
-    except httpx.HTTPStatusError as e:
-        print(f"✗ HTTP Error: {e.response.status_code}")
-        print(f"  Detail: {e.response.json()['detail']}")
-    except Exception as e:
-        print(f"✗ Error: {e}")
-    finally:
-        client.close()
-
-if __name__ == "__main__":
-    main()
-```
-
-### B. 环境变量配置
-
-推荐使用环境变量管理 API Key：
-
-```python
-import os
-from neuromemory_client import NeuroMemoryClient
-
-client = NeuroMemoryClient(
-    api_key=os.environ["NEUROMEMORY_API_KEY"],
-    base_url=os.environ.get("NEUROMEMORY_BASE_URL", "http://localhost:8765")
-)
-```
-
-`.env` 文件：
-```bash
-NEUROMEMORY_API_KEY=nm_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-NEUROMEMORY_BASE_URL=http://localhost:8765
-```
-
-### C. 类型提示
-
-SDK 返回的数据是字典（dict），可以使用类型提示增强代码可读性：
-
-```python
-from typing import Dict, List, Any
-
-def process_search_results(results: List[Dict[str, Any]]) -> None:
-    for result in results:
-        content: str = result["content"]
-        similarity: float = result["similarity"]
-        print(f"[{similarity:.2f}] {content}")
-```
-
----
-
-**文档维护**: 本文档与 SDK 代码同步更新。如有问题，请提交 Issue。
+**文档维护**: 本文档随代码同步更新。如有问题，请提交 Issue。

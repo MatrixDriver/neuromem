@@ -18,22 +18,23 @@ services:
       timeout: 5s
       retries: 5
 
-  api:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
-    ports:
-      - "8765:8765"
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
     environment:
-      DATABASE_URL: postgresql+asyncpg://neuromemory:neuromemory@db:5432/neuromemory
-      DATABASE_URL_SYNC: postgresql://neuromemory:neuromemory@db:5432/neuromemory
-      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
-      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-siliconflow}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
+      MINIO_ROOT_USER: neuromemory
+      MINIO_ROOT_PASSWORD: neuromemory123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:
+  minio_data:

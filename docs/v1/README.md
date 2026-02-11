@@ -75,7 +75,7 @@ v2 采用 **PostgreSQL + pgvector 统一存储**，带来以下优势：
 
 4. **导入数据**:
    ```python
-   from neuromemory_client import NeuroMemoryClient
+   from neuromemory import NeuroMemoryClient
 
    client = NeuroMemoryClient(api_key="nm_xxx")
 
