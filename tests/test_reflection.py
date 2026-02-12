@@ -208,9 +208,8 @@ async def test_parse_insight_result_handles_invalid_json(db_session, mock_embedd
 
 @pytest.mark.asyncio
 async def test_reflect_facade_method(db_session, mock_embedding):
-    """Test the NeuroMemory.reflect() facade method."""
+    """Test the NeuroMemory.reflect() facade method with full memory consolidation."""
     from neuromemory import NeuroMemory
-    from neuromemory.services.search import SearchService
 
     # Create NeuroMemory with LLM
     mock_llm = MockLLMProvider(
@@ -225,20 +224,28 @@ async def test_reflect_facade_method(db_session, mock_embedding):
     )
     await nm.init()
 
-    # Add some test memories first
-    await nm.add_memory(
+    # Add some conversations (unextracted)
+    await nm.conversations.add_message(
         user_id="facade_user",
+        role="user",
         content="I work at OpenAI on LLMs",
-        metadata={"emotion": {"valence": 0.3, "arousal": 0.5, "label": "satisfied"}},
     )
-    await nm.add_memory(
+    await nm.conversations.add_message(
         user_id="facade_user",
-        content="Yesterday was stressful",
-        metadata={"emotion": {"valence": -0.6, "arousal": 0.7, "label": "stressed"}},
+        role="user",
+        content="Yesterday was very stressful",
     )
 
+    # Reflect should: 1) extract conversations, 2) generate insights, 3) update emotion profile
     result = await nm.reflect("facade_user", limit=10)
 
+    # Check extraction results
+    assert "conversations_processed" in result
+    assert "facts_added" in result
+    assert "preferences_updated" in result
+    assert "relations_added" in result
+
+    # Check insight generation
     assert "insights_generated" in result
     assert "insights" in result
     assert "emotion_profile" in result

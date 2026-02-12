@@ -548,18 +548,25 @@ class NeuroMemory:
         user_id: str,
         limit: int = 50,
     ) -> dict:
-        """Reflect on recent memories to generate higher-level insights.
+        """Comprehensive memory consolidation: re-extract + generate insights + update profile.
 
-        Requires LLM provider. Performs two types of reflection:
-        1. Generates pattern/summary insights → stored as embeddings
-        2. Updates emotion profile → stored in emotion_profiles table
+        This is a holistic reflection operation that:
+        1. Re-extracts unprocessed conversations (facts, preferences, relations)
+        2. Generates pattern/summary insights from all recent memories
+        3. Updates emotion profile from emotion-tagged memories
+
+        Requires LLM provider.
 
         Args:
             user_id: The user to reflect about.
-            limit: Max number of recent memories to consider.
+            limit: Max number of recent messages/memories to consider.
 
         Returns:
             {
+                "conversations_processed": int,
+                "facts_added": int,
+                "preferences_updated": int,
+                "relations_added": int,
                 "insights_generated": int,
                 "insights": [{"content": "...", "category": "pattern|summary"}],
                 "emotion_profile": {"latest_state": "...", "valence_avg": ...}
@@ -568,9 +575,35 @@ class NeuroMemory:
         if not self._llm:
             raise RuntimeError("LLM provider required for reflection")
 
+        from neuromemory.services.conversation import ConversationService
+        from neuromemory.services.memory_extraction import MemoryExtractionService
         from neuromemory.services.reflection import ReflectionService
 
-        # Get recent memories (excluding insights themselves)
+        # Step 1: Re-extract unprocessed conversations
+        extraction_result = {
+            "conversations_processed": 0,
+            "facts_added": 0,
+            "preferences_updated": 0,
+            "relations_added": 0,
+        }
+
+        async with self._db.session() as session:
+            conv_svc = ConversationService(session)
+            unextracted = await conv_svc.get_unextracted_messages(user_id, limit=limit)
+
+            if unextracted:
+                extraction_svc = MemoryExtractionService(
+                    session, self._embedding, self._llm, self._graph_enabled
+                )
+                extract_result = await extraction_svc.extract_from_messages(
+                    user_id, unextracted
+                )
+                extraction_result["conversations_processed"] = len(unextracted)
+                extraction_result["facts_added"] = extract_result.get("facts_stored", 0)
+                extraction_result["preferences_updated"] = extract_result.get("preferences_stored", 0)
+                extraction_result["relations_added"] = extract_result.get("triples_stored", 0)
+
+        # Step 2: Get all recent memories (including newly extracted ones)
         recent_memories: list[dict] = []
         async with self._db.session() as session:
             from sqlalchemy import text as sql_text
@@ -595,12 +628,13 @@ class NeuroMemory:
 
         if not recent_memories:
             return {
+                **extraction_result,
                 "insights_generated": 0,
                 "insights": [],
                 "emotion_profile": None,
             }
 
-        # Get existing insights to avoid duplication
+        # Step 3: Get existing insights to avoid duplication
         existing_insights: list[dict] = []
         async with self._db.session() as session:
             result = await session.execute(
@@ -619,15 +653,16 @@ class NeuroMemory:
                     "metadata": row.metadata,
                 })
 
-        # Generate insights and update emotion profile
+        # Step 4: Generate insights and update emotion profile
         async with self._db.session() as session:
             reflection_svc = ReflectionService(session, self._embedding, self._llm)
-            result = await reflection_svc.reflect(
+            reflection_result = await reflection_svc.reflect(
                 user_id, recent_memories, existing_insights or None,
             )
 
         return {
-            "insights_generated": len(result["insights"]),
-            "insights": result["insights"],
-            "emotion_profile": result["emotion_profile"],
+            **extraction_result,
+            "insights_generated": len(reflection_result["insights"]),
+            "insights": reflection_result["insights"],
+            "emotion_profile": reflection_result["emotion_profile"],
         }

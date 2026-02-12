@@ -57,7 +57,7 @@ asyncio.run(main())
 | **文件管理** | `nm.files` | 文件上传到 S3/MinIO，自动提取文本并生成 embedding |
 | **图数据库** | `nm.graph` | 基于 Apache AGE 的知识图谱，节点/边 CRUD、路径查找 |
 | **记忆提取** | `nm.extract_memories()` | 用 LLM 从对话中自动提取偏好、事实、事件，含情感标注和重要性评分 |
-| **反思** | `nm.reflect()` | 从近期记忆中生成高层次洞察（行为模式、阶段总结、深层理解） |
+| **反思** | `nm.reflect()` | 全面记忆整理：重新提取未处理对话 + 生成洞察 + 更新情感画像 |
 
 ### 拟人记忆能力
 
@@ -103,7 +103,10 @@ NeuroMemory 独创的三层情感设计，让 AI agent 既能记住具体事件�
 **检索方式对比**：
 - `search()`: 纯余弦相似度，向后兼容
 - `recall()`: `relevance × recency × importance` + 图实体，推荐使用
-- `reflect()`: LLM 从近期记忆生成洞察（行为模式、阶段总结）+ 更新情感画像
+- `reflect()`: 全面记忆整理操作
+  1. 重新提取未处理的对话（fact/preference/relation）
+  2. 生成洞察（行为模式、阶段总结）
+  3. 更新情感画像
 
 ---
 
