@@ -104,11 +104,59 @@ NeuroMemory 独创的三层情感设计，让 AI agent 既能记住具体事件�
 
 ### 如何使用
 
+#### 两种记忆管理方式
+
+NeuroMemory 提供两种方式管理记忆，适用于不同场景：
+
+**方式一：会话驱动（推荐用于聊天机器人）**
+```python
+# 1. 存储原始对话消息
+await nm.conversations.add_message(user_id="alice", role="user", content="我在 Google 工作")
+await nm.conversations.add_message(user_id="alice", role="assistant", content="了解！")
+
+# 2. 自动提取结构化记忆（LLM 分析对话内容）
+await nm.extract_memories(user_id="alice")
+# 提取结果：fact="在 Google 工作", preference={"company": "Google"}, relation=(alice)-[works_at]->(Google)
+
+# 3. 定期整理记忆
+await nm.reflect(user_id="alice")  # 会自动处理未提取的对话
+```
+
+**方式二：直接添加记忆（推荐用于知识库导入）**
+```python
+# 直接添加结构化记忆，跳过对话存储
+await nm.add_memory(
+    user_id="alice",
+    content="在 Google 工作",
+    memory_type="fact",
+    metadata={"source": "user_profile", "importance": 8}
+)
+```
+
+**区别与选择**：
+
+| 维度 | 会话驱动 (conversations) | 直接添加 (add_memory) |
+|------|------------------------|---------------------|
+| **数据源** | 原始对话消息（user/assistant） | 已知的结构化信息 |
+| **处理方式** | 需要 LLM 提取 → 自动分类 | 直接存储，无需 LLM |
+| **适用场景** | 聊天机器人、对话 agent | 知识库导入、手动管理 |
+| **优势** | 保留完整对话上下文，自动情感标注 | 精确控制，性能更高 |
+| **成本** | 需要 LLM API 调用 | 无 LLM 成本 |
+
+**最佳实践**：
+- 聊天场景：用 `conversations.add_message()` + `ExtractionStrategy` 自动管理
+- 批量导入：用 `add_memory()` 直接添加已知事实
+- 混合使用：对话用 conversations，系统信息用 add_memory
+
+---
+
+#### 核心操作流程
+
 NeuroMemory 的核心使用流程围绕三个关键操作：
 
-**插入记忆（add_memory）**：
-- 手动添加记忆：`await nm.add_memory(user_id, content, memory_type)`
-- 自动提取记忆：`await nm.extract_memories(user_id)`（需要 LLM）
+**插入记忆**：
+- 会话驱动：`conversations.add_message()` → `extract_memories()`（自动分类，需要 LLM）
+- 直接添加：`add_memory(user_id, content, memory_type)`（手动指定类型）
 - 目的：将用户的对话、事件、知识转化为结构化记忆存储
 
 **召回记忆（recall）**：
@@ -117,8 +165,11 @@ NeuroMemory 的核心使用流程围绕三个关键操作：
 - 在对话中使用：让 agent 能"想起"相关的历史信息来回应用户
 
 **整理记忆（reflect）**：
-- 定期整理：`await nm.reflect(user_id)`
-- 目的：从海量碎片记忆中提炼高层洞察（行为模式、阶段总结），更新情感画像
+- 全面整理：`await nm.reflect(user_id)`
+- 三步操作流程：
+  1. **查漏补缺**：重新提取未处理的对话，补充遗漏的事实、偏好、关系
+  2. **提炼洞察**：从所有近期记忆中生成高层理解（行为模式、阶段总结）
+  3. **更新画像**：整合情感数据，更新用户的近期状态和长期特质
 - **持续学习系统**：这不是简单的数据存储，而是让 agent 真正"认识"用户的过程
   - 理解用户的思维模式："他喜欢在晚上工作，遇到难题会先查文档再问人"
   - 捕捉情感变化："最近因为项目延期压力大，但聊到新技术时很兴奋"
@@ -158,63 +209,127 @@ NeuroMemory 提供 7 种记忆类型，每种有不同的获取方式：
 - `kv.get()`: 精确键值查询，用于偏好配置
 - `graph.*`: 图遍历查询，用于关系网络
 
-#### 2. 完整使用流程
+#### 2. 完整 Agent 示例
+
+以下是一个带记忆的聊天 agent 完整实现：
 
 ```python
 from neuromemory import NeuroMemory, SiliconFlowEmbedding, OpenAILLM, ExtractionStrategy
+from openai import AsyncOpenAI
 
-async with NeuroMemory(
-    database_url="postgresql+asyncpg://...",
-    embedding=SiliconFlowEmbedding(api_key="..."),
-    llm=OpenAILLM(api_key="..."),  # 可选，用于记忆提取和反思
-    extraction_strategy=ExtractionStrategy(
-        message_interval=10,       # 每 10 条消息自动提取
-        reflection_interval=50,    # 每 50 次提取后自动反思
-    )
-) as nm:
-    # === 步骤 1：对话过程中自动记录 ===
-    await nm.conversations.add_message(
-        user_id="alice",
-        role="user",
-        content="我在 Google 工作，主要做后端开发，最近项目压力很大"
-    )
-    # 自动提取：
-    # - fact: "在 Google 工作", "做后端开发"
-    # - episodic: "最近项目压力很大" (含 emotion: {valence: -0.6, arousal: 0.7, label: "焦虑"})
-    # - preference: {"skill": "后端开发"}
-    # - relation: (alice)-[works_at]->(Google)
+class MemoryAgent:
+    def __init__(self, nm: NeuroMemory, openai_client: AsyncOpenAI):
+        self.nm = nm
+        self.llm = openai_client
 
-    # === 步骤 2：对话中智能回忆 ===
-    # 回忆工作信息（事实 + 情景）
-    work_memories = await nm.recall(user_id="alice", query="工作情况")
-    # 返回：["在 Google 工作", "做后端开发", "最近项目压力很大"] (按综合评分排序)
+    async def chat(self, user_id: str, user_input: str) -> str:
+        """处理用户输入，返回 agent 回复"""
 
-    # 查询偏好设置
-    skill = await nm.kv.get("preferences", "alice", "skill")
-    # 返回："后端开发"
+        # === 步骤 1：存储用户消息 ===
+        await self.nm.conversations.add_message(
+            user_id=user_id,
+            role="user",
+            content=user_input
+        )
 
-    # 查询关系网络
-    entities = await nm.graph.get_neighbors(node_id="alice", node_type="User")
-    # 返回：[(Google, "works_at"), ...]
+        # === 步骤 2：召回相关记忆 ===
+        recall_result = await self.nm.recall(user_id=user_id, query=user_input, limit=5)
+        memories = recall_result["merged"]
 
-    # === 步骤 3：定期整理记忆 ===
-    result = await nm.reflect(user_id="alice")
-    # 执行：
-    # 1. 查漏补缺：重新提取未处理的对话
-    # 2. 生成洞察：
-    #    - pattern: "用户是 Google 的后端工程师"
-    #    - summary: "用户近期工作压力大，频繁提到项目延期"
-    # 3. 更新情感画像：
-    #    - latest_state: "最近工作压力大，情绪偏焦虑"
-    #    - emotion_triggers: {"工作": {"valence": -0.5}}
+        # 获取用户偏好
+        language = await self.nm.kv.get("preferences", user_id, "language") or "zh-CN"
 
-    print(f"提取了 {result['facts_added']} 个事实")
-    print(f"生成了 {result['insights_generated']} 条洞察")
+        # 获取近期洞察
+        insights = await self.nm.search(user_id, user_input, memory_type="insight", limit=3)
 
-    # 查询洞察（高层理解）
-    insights = await nm.search(user_id="alice", query="用户特点", memory_type="insight")
-    # 返回：["用户是 Google 的后端工程师", "用户近期工作压力大"]
+        # === 步骤 3：构建包含记忆的 prompt ===
+        memory_context = "\n".join([
+            f"- {m['content']} (重要性: {m.get('metadata', {}).get('importance', 5)})"
+            for m in memories[:3]
+        ]) if memories else "暂无相关记忆"
+
+        insight_context = "\n".join([
+            f"- {i['content']}" for i in insights
+        ]) if insights else "暂无深度理解"
+
+        system_prompt = f"""你是一个有记忆的 AI 助手。请用 {language} 语言回复。
+
+        **关于用户的具体记忆**：
+        {memory_context}
+
+        **对用户的深度理解（洞察）**：
+        {insight_context}
+
+        请根据这些记忆和理解，以朋友的口吻自然地回应用户：
+        1. 如果记忆中有相关信息，自然地提及它们，展现你记得 ta 说过的话
+        2. 利用洞察来理解用户的性格、习惯、情感状态
+        3. 如果用户情绪低落（根据历史记忆判断），给予关心和支持
+        4. 避免机械地复述记忆，要像真正的朋友一样对话"""
+
+        # === 步骤 4：调用 LLM 生成回复 ===
+        response = await self.llm.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_input}
+            ]
+        )
+        assistant_reply = response.choices[0].message.content
+
+        # === 步骤 5：存储 assistant 回复 ===
+        await self.nm.conversations.add_message(
+            user_id=user_id,
+            role="assistant",
+            content=assistant_reply
+        )
+
+        return assistant_reply
+
+
+# 使用示例
+async def main():
+    async with NeuroMemory(
+        database_url="postgresql+asyncpg://...",
+        embedding=SiliconFlowEmbedding(api_key="..."),
+        llm=OpenAILLM(api_key="..."),
+        extraction_strategy=ExtractionStrategy(
+            message_interval=10,       # 每 10 条消息自动提取记忆
+            reflection_interval=50,    # 每 50 次提取后自动反思
+        )
+    ) as nm:
+        agent = MemoryAgent(nm, AsyncOpenAI(api_key="..."))
+
+        # 第一轮对话
+        reply1 = await agent.chat("alice", "我在 Google 工作，做后端开发，最近压力有点大")
+        print(f"Agent: {reply1}")
+        # Agent: "听起来你最近工作挺辛苦的。在 Google 做后端开发一定很有挑战性吧..."
+
+        # 自动提取记忆（达到 message_interval 时触发）
+        # 提取结果：
+        # - fact: "在 Google 工作", "做后端开发"
+        # - episodic: "最近压力有点大" (emotion: {valence: -0.5, label: "压力"})
+        # - relation: (alice)-[works_at]->(Google)
+
+        # 第二轮对话（几天后）
+        reply2 = await agent.chat("alice", "有什么减压的建议吗？")
+        print(f"Agent: {reply2}")
+        # Agent: "我记得你在 Google 做后端开发，最近压力挺大的。要不要试试..."
+        # ↑ agent 能"记住"之前的对话内容
+
+        # 手动触发反思整理（也可以由 ExtractionStrategy 自动触发）
+        result = await nm.reflect(user_id="alice")
+        print(f"生成了 {result['insights_generated']} 条洞察")
+        # 洞察示例：
+        # - pattern: "用户是 Google 的后端工程师，关注技术和工作压力"
+        # - summary: "用户近期工作压力较大，寻求减压建议"
+        # - emotion_profile: "近期情绪偏焦虑 (valence: -0.5)"
 ```
+
+**关键点说明**：
+1. **召回记忆**：每次对话前，用 `recall()` 找出相关记忆
+2. **注入 prompt**：将记忆作为 context 注入到 LLM 的 system prompt
+3. **自动提取**：`ExtractionStrategy` 在后台自动提取和整理记忆
+4. **持续学习**：agent 随着对话增加，对用户的理解越来越深入
 
 #### 3. 策略配置
 
