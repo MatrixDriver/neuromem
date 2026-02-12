@@ -59,7 +59,7 @@ asyncio.run(main())
 | 模块 | 入口 | 功能 |
 |------|------|------|
 | **语义记忆** | `nm.add_memory()` / `nm.search()` | 存储文本并自动生成 embedding，向量相似度检索 |
-| **三因子检索** | `nm.recall()` | relevance × recency × importance 综合评分检索 |
+| **混合检索** | `nm.recall()` | 三因子向量检索 (relevance × recency × importance) + 图实体检索，合并去重 |
 | **KV 存储** | `nm.kv` | 通用键值存储（偏好、配置），namespace + scope 隔离 |
 | **对话管理** | `nm.conversations` | 会话消息存储、批量导入、会话列表 |
 | **文件管理** | `nm.files` | 文件上传到 S3/MinIO，自动提取文本并生成 embedding |
@@ -75,9 +75,77 @@ asyncio.run(main())
 |------|---------|---------|
 | **情感标注** | LeDoux 1996 情感标记 + Russell Circumplex | LLM 提取时标注 valence(-1~1)、arousal(0~1)、label，存入 metadata |
 | **重要性评分** | Generative Agents (Park 2023) | 每条记忆 1-10 分，影响检索排序（生日=9, 天气=2） |
-| **三因子检索** | Generative Agents + Ebbinghaus | `score = relevance × recency × importance`，高 arousal 记忆衰减更慢 |
+| **混合检索** | Generative Agents + Ebbinghaus | 三因子向量 (`relevance × recency × importance`) + 图实体遍历，高 arousal 记忆衰减更慢 |
 | **访问追踪** | ACT-R 记忆模型 | 自动记录 access_count 和 last_accessed_at |
 | **反思机制** | Generative Agents Reflection | 定期从近期记忆提炼高层洞察（pattern/summary），更新情感画像 |
+
+#### 为什么用混合检索（三因子 + 图）
+
+`recall()` 不是简单的向量检索，而是**混合检索**，结合了三因子评分和图遍历：
+
+**1. 三因子向量检索**
+
+```python
+Score = relevance × recency × importance
+
+# 相关性 (0-1)：语义相似度
+relevance = 1 - cosine_distance
+
+# 时效性 (0-1)：指数衰减，情感唤醒减缓遗忘
+recency = e^(-t / decay_rate × (1 + arousal × 0.5))
+
+# 重要性 (0.1-1.0)：LLM 评估或人工标注
+importance = metadata.importance / 10
+```
+
+**为什么采用三因子？**
+
+| 对比维度 | 纯向量检索 | 三因子检索 |
+|---------|-----------|-----------|
+| **时间感知** | ❌ 1 年前的记忆和昨天的权重相同 | ✅ 指数衰减，符合 Ebbinghaus 遗忘曲线 |
+| **情感影响** | ❌ 不考虑情感强度 | ✅ 高 arousal 记忆（面试、分手）衰减慢 50% |
+| **重要性** | ❌ 琐事（天气）和大事（生日）同等对待 | ✅ 重要事件优先级更高 |
+| **适用场景** | 静态知识库 | 长期陪伴型 agent |
+
+**实际案例**：
+
+用户问："我在哪工作？"
+
+| 记忆内容 | 时间 | 纯向量 | 三因子 | 应该返回 |
+|---------|------|--------|--------|---------|
+| "我在 Google 工作" | 1 年前 | 0.95 | 0.008 | ❌ 已过时 |
+| "上周从 Google 离职了" | 7 天前 | 0.85 | 0.67 | ✅ 最新且重要 |
+
+纯向量会返回过时信息，三因子优先返回最新相关记忆。
+
+**2. 图实体检索**
+
+从知识图谱中查找实体相关的 facts：
+- 查询中提到的实体（如 "Google"）
+- 用户自身相关的实体关系
+
+**3. 合并策略**
+
+```python
+# 1. 三因子找出相关记忆（事实、情景、洞察）
+vector_results = scored_search(query, limit=10)
+
+# 2. 图中找出实体相关的记忆（关系、事实）
+graph_results = find_entity_facts(query, limit=10)
+
+# 3. 按 content 去重合并，保留 top-N
+merged = deduplicate(vector_results + graph_results)[:limit]
+```
+
+**为什么需要图检索？**
+- 向量检索擅长**语义匹配**："在 Google 工作" ≈ "工作地点"
+- 图检索擅长**结构化关系**：(alice)-[works_at]->(Google)-[located_in]->(Mountain View)
+- 两者互补，提供更全面的记忆召回
+
+**学术基础**：
+- **Generative Agents** (Stanford, 2023)：三因子检索
+- **ACT-R 认知架构**：基础激活 = log(Σ t^-d)
+- 已在虚拟小镇 Smallville 实验中验证有效性
 
 #### 记忆类型总结
 
