@@ -18,19 +18,27 @@ pip install -e ".[all]"
 
 ```python
 import asyncio
-from neuromemory import NeuroMemory, SiliconFlowEmbedding
+from neuromemory import NeuroMemory, SiliconFlowEmbedding, OpenAILLM
 
 async def main():
     async with NeuroMemory(
         database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
         embedding=SiliconFlowEmbedding(api_key="your-key"),
+        llm=OpenAILLM(api_key="your-openai-key"),  # 用于自动提取记忆
     ) as nm:
-        # 添加记忆
-        await nm.add_memory(
+        # 存储对话消息（推荐方式）
+        # NeuroMemory 会按照 ExtractionStrategy 策略自动提取记忆
+        # 如需手动指定记忆类型，可使用 nm.add_memory(user_id, content, memory_type="fact")
+        await nm.conversations.add_message(
             user_id="alice",
-            content="I work at ABC Company as a software engineer",
-            memory_type="fact",
+            role="user",
+            content="I work at ABC Company as a software engineer"
         )
+
+        # 手动触发记忆提取（可选）
+        # 系统会按策略自动提取，这里手动调用是为了演示
+        # 提取后会自动分类为 fact、preference、relation 等类型
+        await nm.extract_memories(user_id="alice")
 
         # 三因子检索（相关性 × 时效性 × 重要性）
         result = await nm.recall(user_id="alice", query="Where does Alice work?")
