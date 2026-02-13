@@ -140,15 +140,15 @@ agent 需要上下文 → 召回记忆 (recall)
 
 NeuroMemory 提供 7 种记忆类型，每种有不同的存储和获取方式：
 
-| 记忆类型 | 存储方式 | 获取方式 | 示例 |
-|---------|---------|---------|------|
-| **偏好** | KV Store | `nm.kv.get("preferences", user_id, key)` | `language=zh-CN` |
-| **事实** | Embedding + Graph | `nm.recall(user_id, query)` | "在 Google 工作" |
-| **情景** | Embedding | `nm.recall(user_id, query)` | "昨天面试很紧张" |
-| **关系** | Graph Store | `nm.graph.get_neighbors(type, id)` | `(user)-[works_at]->(Google)` |
-| **洞察** | Embedding | `nm.search(user_id, query, memory_type="insight")` | "用户倾向于晚上工作" |
-| **情感画像** | Table | `reflect()` 自动更新 | "容易焦虑，对技术兴奋" |
-| **通用** | Embedding | `nm.search(user_id, query)` | 手动 `add_memory()` 的内容 |
+| 记忆类型 | 存储方式 | 底层存储 | 获取方式 | 示例 |
+|---------|---------|---------|---------|------|
+| **偏好** | KV Store | PostgreSQL `key_values` 表 | `nm.kv.get("preferences", user_id, key)` | `language=zh-CN` |
+| **事实** | Embedding + Graph | pgvector `embeddings` 表 + AGE 图 | `nm.recall(user_id, query)` | "在 Google 工作" |
+| **情景** | Embedding | pgvector `embeddings` 表 | `nm.recall(user_id, query)` | "昨天面试很紧张" |
+| **关系** | Graph Store | Apache AGE 图节点/边 | `nm.graph.get_neighbors(type, id)` | `(user)-[works_at]->(Google)` |
+| **洞察** | Embedding | pgvector `embeddings` 表 | `nm.search(user_id, query, memory_type="insight")` | "用户倾向于晚上工作" |
+| **情感画像** | Table | PostgreSQL `emotion_profiles` 表 | `reflect()` 自动更新 | "容易焦虑，对技术兴奋" |
+| **通用** | Embedding | pgvector `embeddings` 表 | `nm.search(user_id, query)` | 手动 `add_memory()` 的内容 |
 
 ### 三因子混合检索
 
@@ -200,17 +200,6 @@ importance = metadata.importance / 10                    # LLM 评估的重要�
 - **访问追踪**：自动记录 access_count 和 last_accessed_at，符合 ACT-R 记忆模型
 
 理论基础：Generative Agents (Park 2023) 的 Reflection 机制 + LeDoux 情感标记 + Ebbinghaus 遗忘曲线 + ACT-R 记忆模型。
-
-### 全栈记忆能力
-
-| 模块 | 入口 | 功能 |
-|------|------|------|
-| **语义记忆** | `nm.add_memory()` / `nm.search()` | 存储文本 + embedding，向量相似度检索 |
-| **混合检索** | `nm.recall()` | 三因子 + 图实体，合并去重 |
-| **KV 存储** | `nm.kv` | 键值存储（偏好、配置），namespace + scope 隔离 |
-| **对话管理** | `nm.conversations` | 会话消息存储、批量导入、会话列表 |
-| **文件管理** | `nm.files` | 上传到 S3/MinIO，自动提取文本并生成 embedding |
-| **知识图谱** | `nm.graph` | Apache AGE，节点/边 CRUD、路径查找、Cypher 查询 |
 
 ### 与同类框架对比
 
