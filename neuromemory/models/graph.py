@@ -15,6 +15,9 @@ class NodeType(str, Enum):
     MEMORY = "Memory"
     CONCEPT = "Concept"
     ENTITY = "Entity"
+    ORGANIZATION = "Organization"
+    LOCATION = "Location"
+    SKILL = "Skill"
 
 
 class EdgeType(str, Enum):
@@ -23,6 +26,13 @@ class EdgeType(str, Enum):
     RELATED_TO = "RELATED_TO"
     KNOWS = "KNOWS"
     ABOUT = "ABOUT"
+    WORKS_AT = "WORKS_AT"
+    LIVES_IN = "LIVES_IN"
+    HAS_SKILL = "HAS_SKILL"
+    STUDIED_AT = "STUDIED_AT"
+    BELONGS_TO = "BELONGS_TO"
+    USES = "USES"
+    CUSTOM = "CUSTOM"
 
 
 class GraphNode(Base, TimestampMixin):

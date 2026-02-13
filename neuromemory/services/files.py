@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from neuromemory.models.document import Document
@@ -136,6 +136,65 @@ class FileService:
         self.db.add(doc)
         await self.db.flush()
         return doc
+
+    async def search(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 5,
+        file_types: list[str] | None = None,
+        category: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict]:
+        """Semantic search for file contents with document metadata."""
+        query_vector = await self._embedding.embed(query)
+        vector_str = f"[{','.join(str(float(v)) for v in query_vector)}]"
+
+        filters = "d.user_id = :user_id"
+        params: dict = {"user_id": user_id, "limit": limit}
+
+        if file_types:
+            filters += " AND d.file_type = ANY(:file_types)"
+            params["file_types"] = file_types
+
+        if category:
+            filters += " AND d.category = :category"
+            params["category"] = category
+
+        if tags:
+            filters += " AND d.tags @> :tags::jsonb"
+            params["tags"] = str(tags).replace("'", '"')
+
+        sql = text(
+            f"""
+            SELECT d.id, d.filename, d.file_type, d.category, d.tags,
+                   d.file_size, d.extracted_text, d.created_at,
+                   1 - (e.embedding <=> '{vector_str}'::vector) AS similarity
+            FROM documents d
+            JOIN embeddings e ON d.embedding_id = e.id
+            WHERE {filters}
+            ORDER BY e.embedding <=> '{vector_str}'::vector
+            LIMIT :limit
+            """
+        )
+
+        result = await self.db.execute(sql, params)
+        rows = result.fetchall()
+
+        return [
+            {
+                "file_id": str(row.id),
+                "filename": row.filename,
+                "file_type": row.file_type,
+                "category": row.category,
+                "tags": row.tags,
+                "file_size": row.file_size,
+                "extracted_text": row.extracted_text[:200] if row.extracted_text else None,
+                "similarity": round(float(row.similarity), 4),
+                "created_at": row.created_at,
+            }
+            for row in rows
+        ]
 
     async def list_documents(
         self,

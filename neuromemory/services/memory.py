@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Date
 
 from neuromemory.models.memory import Embedding
+from neuromemory.providers.embedding import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +20,9 @@ logger = logging.getLogger(__name__)
 class MemoryService:
     """Service for time-based memory queries and aggregations."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, embedding: Optional[EmbeddingProvider] = None):
         self.db = db
+        self._embedding = embedding
 
     async def get_memories_by_time_range(
         self,
@@ -191,3 +194,137 @@ class MemoryService:
             "total_periods": len(data),
             "data": data,
         }
+
+    async def list_all_memories(
+        self,
+        user_id: str,
+        memory_type: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[int, list[Embedding]]:
+        """List all memories with optional filtering and pagination.
+
+        Returns:
+            Tuple of (total_count, list_of_memories)
+        """
+        conditions = [Embedding.user_id == user_id]
+
+        if memory_type:
+            conditions.append(Embedding.memory_type == memory_type)
+
+        # Get total count
+        count_stmt = select(func.count()).select_from(Embedding).where(and_(*conditions))
+        total = await self.db.scalar(count_stmt) or 0
+
+        # Get paginated results
+        stmt = (
+            select(Embedding)
+            .where(and_(*conditions))
+            .order_by(desc(Embedding.created_at))
+            .limit(limit)
+            .offset(offset)
+        )
+
+        result = await self.db.execute(stmt)
+        memories = list(result.scalars().all())
+
+        return total, memories
+
+    async def get_memory_by_id(
+        self,
+        memory_id: str | uuid.UUID,
+        user_id: Optional[str] = None,
+    ) -> Optional[Embedding]:
+        """Get a single memory by ID.
+
+        Args:
+            memory_id: UUID of the memory
+            user_id: Optional user_id for access control
+
+        Returns:
+            Embedding object or None if not found
+        """
+        if isinstance(memory_id, str):
+            memory_id = uuid.UUID(memory_id)
+
+        conditions = [Embedding.id == memory_id]
+        if user_id:
+            conditions.append(Embedding.user_id == user_id)
+
+        stmt = select(Embedding).where(and_(*conditions))
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def update_memory(
+        self,
+        memory_id: str | uuid.UUID,
+        user_id: str,
+        content: Optional[str] = None,
+        memory_type: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> Optional[Embedding]:
+        """Update a memory's content, type, or metadata.
+
+        If content is changed, the embedding vector will be regenerated.
+
+        Args:
+            memory_id: UUID of the memory to update
+            user_id: User ID (for access control)
+            content: New content (triggers embedding regeneration)
+            memory_type: New memory type
+            metadata: New metadata (replaces existing)
+
+        Returns:
+            Updated Embedding object or None if not found
+        """
+        # Fetch existing memory
+        memory = await self.get_memory_by_id(memory_id, user_id)
+        if not memory:
+            return None
+
+        # Update fields
+        content_changed = False
+        if content is not None and content != memory.content:
+            memory.content = content
+            content_changed = True
+
+        if memory_type is not None:
+            memory.memory_type = memory_type
+
+        if metadata is not None:
+            memory.metadata_ = metadata
+
+        # Regenerate embedding if content changed
+        if content_changed and self._embedding:
+            vector = await self._embedding.embed(content)
+            memory.embedding = vector
+        elif content_changed and not self._embedding:
+            logger.warning(
+                "Content changed but no embedding provider available. "
+                "Embedding vector not updated."
+            )
+
+        await self.db.flush()
+        return memory
+
+    async def delete_memory(
+        self,
+        memory_id: str | uuid.UUID,
+        user_id: str,
+    ) -> bool:
+        """Delete a memory by ID.
+
+        Args:
+            memory_id: UUID of the memory to delete
+            user_id: User ID (for access control)
+
+        Returns:
+            True if deleted, False if not found
+        """
+        memory = await self.get_memory_by_id(memory_id, user_id)
+        if not memory:
+            return False
+
+        await self.db.delete(memory)
+        await self.db.flush()
+        return True

@@ -1,9 +1,12 @@
 """Memory embedding model."""
 
+from __future__ import annotations
+
 import uuid
+from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Index, String, Text
+from sqlalchemy import DateTime, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,6 +29,12 @@ class Embedding(Base, TimestampMixin):
         String(50), default="general"
     )
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    access_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False,
+    )
+    last_accessed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
 
     __table_args__ = (
         Index("ix_emb_user", "user_id"),

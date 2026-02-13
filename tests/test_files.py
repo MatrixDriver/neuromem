@@ -132,3 +132,50 @@ async def test_delete_nonexistent(db_session, mock_embedding, mock_storage):
     svc = FileService(db_session, mock_embedding, mock_storage)
     deleted = await svc.delete_document(uuid.uuid4())
     assert deleted is False
+
+
+@pytest.mark.asyncio
+async def test_search_files(db_session, mock_embedding, mock_storage):
+    svc = FileService(db_session, mock_embedding, mock_storage)
+    await svc.upload(user_id="u1", filename="python.txt", file_data=b"Python is a programming language")
+    await svc.upload(user_id="u1", filename="recipe.txt", file_data=b"How to make chocolate cake")
+    await db_session.commit()
+
+    results = await svc.search(user_id="u1", query="programming language")
+    assert len(results) >= 1
+    assert results[0]["filename"] in ("python.txt", "recipe.txt")
+    assert "similarity" in results[0]
+    assert "file_id" in results[0]
+    assert "extracted_text" in results[0]
+
+
+@pytest.mark.asyncio
+async def test_search_files_filter_by_type(db_session, mock_embedding, mock_storage):
+    svc = FileService(db_session, mock_embedding, mock_storage)
+    await svc.upload(user_id="u1", filename="doc.txt", file_data=b"Some text content")
+    await svc.upload(user_id="u1", filename="notes.md", file_data=b"Markdown notes here")
+    await db_session.commit()
+
+    results = await svc.search(user_id="u1", query="content", file_types=["txt"])
+    assert all(r["file_type"] == "txt" for r in results)
+
+
+@pytest.mark.asyncio
+async def test_search_files_filter_by_category(db_session, mock_embedding, mock_storage):
+    svc = FileService(db_session, mock_embedding, mock_storage)
+    await svc.upload(user_id="u1", filename="a.txt", file_data=b"Work related stuff", category="work")
+    await svc.upload(user_id="u1", filename="b.txt", file_data=b"Personal diary entry", category="personal")
+    await db_session.commit()
+
+    results = await svc.search(user_id="u1", query="stuff", category="work")
+    assert all(r["category"] == "work" for r in results)
+
+
+@pytest.mark.asyncio
+async def test_search_files_no_results(db_session, mock_embedding, mock_storage):
+    svc = FileService(db_session, mock_embedding, mock_storage)
+    await svc.upload(user_id="u1", filename="a.txt", file_data=b"Some content")
+    await db_session.commit()
+
+    results = await svc.search(user_id="u2", query="anything")
+    assert results == []
