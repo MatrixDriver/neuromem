@@ -6,14 +6,94 @@
 
 ---
 
-## 快速开始
+## 安装
+
+### 方式 1: 从 PyPI 安装（推荐）
 
 ```bash
-# 1. 启动 PostgreSQL
+# 基础安装（包含核心功能）
+pip install neuromemory
+
+# 或安装所有可选依赖（推荐）
+pip install neuromemory[all]
+
+# 按需安装
+pip install neuromemory[s3]    # S3/MinIO 文件存储
+pip install neuromemory[pdf]   # PDF 文件处理
+pip install neuromemory[docx]  # Word 文档处理
+```
+
+**依赖自动安装**: SQLAlchemy、asyncpg、pgvector、httpx 等核心依赖会自动安装。
+
+### 方式 2: 从源码安装（开发者）
+
+```bash
+git clone https://github.com/yourusername/NeuroMemory
+cd NeuroMemory
+pip install -e ".[dev]"  # 包含测试工具
+```
+
+---
+
+## 外部依赖
+
+NeuroMemory 需要以下外部服务（**不包含在 pip 包中**）：
+
+### 1. PostgreSQL 16+ with pgvector（必需）
+
+```bash
+# 使用项目提供的 Docker Compose
 docker compose -f docker-compose.v2.yml up -d db
 
-# 2. 安装
-pip install -e ".[all]"
+# 或使用官方镜像
+docker run -d -p 5432:5432 \
+  -e POSTGRES_USER=neuromemory \
+  -e POSTGRES_PASSWORD=neuromemory \
+  -e POSTGRES_DB=neuromemory \
+  ankane/pgvector:pg16
+```
+
+### 2. API Keys（必需）
+
+- **Embedding**: [SiliconFlow](https://siliconflow.cn/) 或 [OpenAI](https://platform.openai.com/)
+- **LLM**: [OpenAI](https://platform.openai.com/) 或 [DeepSeek](https://platform.deepseek.com/)（用于自动提取记忆）
+
+### 3. MinIO/S3（可选，仅用于文件存储）
+
+```bash
+docker compose -f docker-compose.v2.yml up -d minio
+```
+
+---
+
+## 快速开始
+
+```python
+import asyncio
+from neuromemory import NeuroMemory, SiliconFlowEmbedding, OpenAILLM
+
+async def main():
+    async with NeuroMemory(
+        database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
+        embedding=SiliconFlowEmbedding(api_key="your-key"),
+        llm=OpenAILLM(api_key="your-openai-key"),  # 用于自动提取记忆
+    ) as nm:
+        # 存储对话消息（推荐方式）
+        await nm.conversations.add_message(
+            user_id="alice",
+            role="user",
+            content="I work at ABC Company as a software engineer"
+        )
+
+        # 手动触发记忆提取
+        await nm.extract_memories(user_id="alice")
+
+        # 三因子检索（相关性 × 时效性 × 重要性）
+        result = await nm.recall(user_id="alice", query="Where does Alice work?")
+        for r in result["merged"]:
+            print(f"[{r['score']:.2f}] {r['content']}")
+
+asyncio.run(main())
 ```
 
 ```python
@@ -709,11 +789,41 @@ print(f"提取了 {stats['facts_extracted']} 条事实")
 
 ### Phase 3（规划中）
 
-- [ ] 用户 Console（Web UI）- 可视化查看和管理记忆
-
-### 待定
-
 - [ ] 自然遗忘（主动记忆清理/归档机制）
+- [ ] 多模态 embedding（图片、音频）
+- [ ] 分布式部署支持
+
+---
+
+## 查看和调试记忆
+
+NeuroMemory 是一个 Python 库，不提供 Web 管理界面。记忆的可视化和管理应该由你的 agent 应用程序提供。
+
+**推荐方式**：
+
+```python
+# 方式 1: 在 agent 应用中查询并展示
+results = await nm.search(user_id="alice", query="工作")
+for r in results:
+    print(f"{r['content']} (score: {r['score']})")
+
+# 方式 2: Jupyter Notebook（数据分析）
+import pandas as pd
+results = await nm.search(user_id="alice", query="")
+df = pd.DataFrame(results)
+df.head()
+
+# 方式 3: 直接查询 PostgreSQL
+# psql -U neuromemory -d neuromemory
+# SELECT content, memory_type, metadata FROM embeddings WHERE user_id = 'alice';
+```
+
+**构建自己的界面**：
+
+如果需要为你的 agent 应用构建管理界面，可以：
+- 调用 `nm.search()` / `nm.kv.list()` / `nm.conversations.get_history()` 等 API
+- 用任何框架构建 UI（Streamlit、Gradio、Flask、FastAPI + React 等）
+- 根据应用场景定制展示方式（聊天界面、数据看板、CLI 工具等）
 
 ---
 

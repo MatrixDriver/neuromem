@@ -149,6 +149,11 @@ Marker：
 - Facade 类在 _core.py 中，每次操作开启独立 session
 - 不要在 `return` 之后写逻辑（不可达代码）
 
-## v1 文件（保留但不再使用）
+## 项目定位
 
-v1 相关文件（`private_brain.py`、`session_manager.py`、`config.py`、`http_server.py` 等根目录 Python 文件）保留在仓库中作为参考。
+NeuroMemory v2 是一个专注的 Python 库，不提供以下内容：
+- ❌ Web 管理界面（记忆可视化应由 agent 应用提供）
+- ❌ HTTP/API 服务器（直接在 Python 代码中使用）
+- ❌ 独立部署的服务（嵌入到你的 agent 程序中）
+
+详见 `docs/WHY_NO_WEB_UI.md`
