@@ -387,7 +387,7 @@ nm = NeuroMemory(database_url="...", embedding=MyEmbedding())
 ### 7.1 开发环境
 
 ```bash
-docker compose -f docker-compose.v2.yml up -d
+docker compose -f docker-compose.yml up -d
 ```
 
 提供：

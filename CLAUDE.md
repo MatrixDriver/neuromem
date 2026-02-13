@@ -68,17 +68,17 @@ tests/
   test_graph.py
   test_memory_extraction.py
 
-docker-compose.v2.yml      # PostgreSQL + MinIO (无 API 服务)
+docker-compose.yml      # PostgreSQL + MinIO (无 API 服务)
 ```
 
 ## 常用命令
 
 ```bash
 # 启动数据库和 MinIO
-docker compose -f docker-compose.v2.yml up -d
+docker compose -f docker-compose.yml up -d
 
 # 只启动数据库
-docker compose -f docker-compose.v2.yml up -d db
+docker compose -f docker-compose.yml up -d db
 
 # 安装开发依赖
 uv pip install -e ".[dev]"
@@ -134,7 +134,7 @@ await nm.close()
 
 ## 测试
 
-测试需要运行中的 PostgreSQL（通过 `docker compose -f docker-compose.v2.yml up -d db` 启动）。
+测试需要运行中的 PostgreSQL（通过 `docker compose -f docker-compose.yml up -d db` 启动）。
 
 Marker：
 - `@pytest.mark.slow`：需要 embedding API（SiliconFlow/OpenAI）

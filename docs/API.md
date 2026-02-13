@@ -1006,5 +1006,5 @@ nm = NeuroMemory(
 
 ---
 
-**更多示例**: [docs/v2/GETTING_STARTED.md](v2/GETTING_STARTED.md)
-**架构文档**: [docs/v2/ARCHITECTURE.md](v2/ARCHITECTURE.md)
+**更多示例**: [docs/GETTING_STARTED.md](v2/GETTING_STARTED.md)
+**架构文档**: [docs/ARCHITECTURE.md](v2/ARCHITECTURE.md)

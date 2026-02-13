@@ -33,7 +33,7 @@ pip install -e ".[all]"
 
 依赖 PostgreSQL（含 pgvector）：
 ```bash
-docker compose -f docker-compose.v2.yml up -d db
+docker compose -f docker-compose.yml up -d db
 ```
 
 ---

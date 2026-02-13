@@ -1,63 +1,40 @@
-
 services:
-  app:
-    # 明确指定 Dockerfile
+  db:
     build:
-      context: .
+      context: ./docker/postgres-age-vector
       dockerfile: Dockerfile
-    container_name: neuromemory_app
-    volumes:
-      - .:/app
+    image: neuromemory-postgres:16-age-vector
     environment:
-      # --- 统一密码逻辑 ---
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-railway2025}
-      
-      # --- 3. 架构连接 ---
-      - NEO4J_URL=bolt://neo4j:7687
-      - NEO4J_USERNAME=neo4j
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6400
-      
-      # 业务开关
-      - ENABLE_GRAPH_STORE=true
-
-    depends_on:
-      - neo4j
-      - qdrant
+      POSTGRES_USER: neuromemory
+      POSTGRES_PASSWORD: neuromemory
+      POSTGRES_DB: neuromemory
     ports:
-      - "8765:8765"
-
-  neo4j:
-    image: neo4j:5.26.0
-    container_name: memory_graph_db
-    ports:
-      - "17687:7687" 
-      - "7474:7474"
-    environment:
-      # 密码引用同一个变量
-      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-railway2025}
-      
-      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
-      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      - "5432:5432"
     volumes:
-      - neo4j_data:/data
-    # 健康检查建议加上，防止 App 启动太快连不上
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-railway2025} 'RETURN 1'"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U neuromemory"]
+      interval: 5s
       timeout: 5s
       retries: 5
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: memory_vector_db
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
     environment:
-      - QDRANT__SERVICE__HTTP_PORT=6400
+      MINIO_ROOT_USER: neuromemory
+      MINIO_ROOT_PASSWORD: neuromemory123
     ports:
-      - "6400:6400"
+      - "9000:9000"
+      - "9001:9001"
     volumes:
-      - qdrant_data:/qdrant/storage
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  neo4j_data:
-  qdrant_data:
+  pgdata:
+  minio_data:

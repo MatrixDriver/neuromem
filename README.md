@@ -43,7 +43,7 @@ NeuroMemory 需要以下外部服务（**不包含在 pip 包中**）：
 
 ```bash
 # 使用项目提供的 Docker Compose
-docker compose -f docker-compose.v2.yml up -d db
+docker compose -f docker-compose.yml up -d db
 
 # 或使用官方镜像
 docker run -d -p 5432:5432 \
@@ -61,7 +61,7 @@ docker run -d -p 5432:5432 \
 ### 3. MinIO/S3（可选，仅用于文件存储）
 
 ```bash
-docker compose -f docker-compose.v2.yml up -d minio
+docker compose -f docker-compose.yml up -d minio
 ```
 
 ---
@@ -128,7 +128,7 @@ async def main():
 asyncio.run(main())
 ```
 
-**完整指南**: [docs/v2/GETTING_STARTED.md](docs/v2/GETTING_STARTED.md)
+**完整指南**: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)
 
 ---
 
@@ -602,9 +602,9 @@ ObjectStorage (ABC)
 | 文档 | 说明 |
 |------|------|
 | **[API 参考](docs/API.md)** | 完整的 Python API 文档（recall, search, extract_memories 等） |
-| **[快速开始](docs/v2/GETTING_STARTED.md)** | 10 分钟上手指南 |
-| **[架构设计](docs/v2/ARCHITECTURE.md)** | 系统架构、Provider 模式、数据模型 |
-| **[使用指南](docs/v2/SDK_GUIDE.md)** | API 用法和代码示例 |
+| **[快速开始](docs/GETTING_STARTED.md)** | 10 分钟上手指南 |
+| **[架构设计](docs/ARCHITECTURE.md)** | 系统架构、Provider 模式、数据模型 |
+| **[使用指南](docs/SDK_GUIDE.md)** | API 用法和代码示例 |
 | **[为什么不提供 Web UI](docs/WHY_NO_WEB_UI.md)** | 设计理念和替代方案 |
 | **[CLAUDE.md](CLAUDE.md)** | Claude Code 工作指南 |
 
@@ -677,7 +677,7 @@ git clone https://github.com/your-repo/NeuroMemory.git
 cd NeuroMemory
 
 # 启动 PostgreSQL（含 pgvector + AGE）
-docker compose -f docker-compose.v2.yml up -d db
+docker compose -f docker-compose.yml up -d db
 
 # 安装（含所有可选依赖）
 pip install -e ".[all]"
@@ -696,7 +696,7 @@ pip install -e ".[dev]"    # 开发和测试工具
 pip install -e ".[all]"    # 全部依赖
 ```
 
-详见 [快速开始指南](docs/v2/GETTING_STARTED.md)
+详见 [快速开始指南](docs/GETTING_STARTED.md)
 
 ---
 
@@ -802,7 +802,7 @@ stats = await nm.extract_memories(user_id="alice", session_id="session_001")
 print(f"提取了 {stats['facts_extracted']} 条事实")
 ```
 
-更多示例见 [使用指南](docs/v2/SDK_GUIDE.md)
+更多示例见 [使用指南](docs/SDK_GUIDE.md)
 
 ---
 

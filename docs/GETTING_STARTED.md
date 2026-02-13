@@ -40,12 +40,12 @@ git clone https://github.com/your-repo/NeuroMemory.git
 cd NeuroMemory
 
 # 启动 PostgreSQL（含 pgvector + Apache AGE 扩展）
-docker compose -f docker-compose.v2.yml up -d db
+docker compose -f docker-compose.yml up -d db
 ```
 
 验证数据库：
 ```bash
-docker compose -f docker-compose.v2.yml ps db
+docker compose -f docker-compose.yml ps db
 # STATUS 应为 healthy
 ```
 
@@ -241,7 +241,7 @@ async with NeuroMemory(
 
 启动 MinIO：
 ```bash
-docker compose -f docker-compose.v2.yml up -d minio
+docker compose -f docker-compose.yml up -d minio
 ```
 
 ### 4.4 图数据库
@@ -325,13 +325,13 @@ async with NeuroMemory(
 **解决**:
 ```bash
 # 检查容器状态
-docker compose -f docker-compose.v2.yml ps db
+docker compose -f docker-compose.yml ps db
 
 # 重启数据库
-docker compose -f docker-compose.v2.yml restart db
+docker compose -f docker-compose.yml restart db
 
 # 查看日志
-docker compose -f docker-compose.v2.yml logs db
+docker compose -f docker-compose.yml logs db
 ```
 
 ### 6.2 表不存在
@@ -372,7 +372,7 @@ nm = NeuroMemory(
     storage=S3Storage(endpoint="http://localhost:9000", ...),
 )
 ```
-确保 MinIO 已启动：`docker compose -f docker-compose.v2.yml up -d minio`
+确保 MinIO 已启动：`docker compose -f docker-compose.yml up -d minio`
 
 ---
 
@@ -404,16 +404,16 @@ nm = NeuroMemory(
 
 ```bash
 # 启动全部服务
-docker compose -f docker-compose.v2.yml up -d
+docker compose -f docker-compose.yml up -d
 
 # 只启动数据库
-docker compose -f docker-compose.v2.yml up -d db
+docker compose -f docker-compose.yml up -d db
 
 # 停止全部服务
-docker compose -f docker-compose.v2.yml down
+docker compose -f docker-compose.yml down
 
 # 清理数据（会删除所有数据）
-docker compose -f docker-compose.v2.yml down -v
+docker compose -f docker-compose.yml down -v
 
 # 运行测试
 pytest tests/ -v --timeout=30
