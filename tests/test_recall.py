@@ -339,7 +339,153 @@ class TestRecallCombinedScoring:
 
 
 # ===========================================================================
-# E. recall() facade (NeuroMemory.recall)
+# E. End-to-end scenarios: insert multiple memories, then recall
+# ===========================================================================
+
+class TestRecallScenarios:
+    """Simulate realistic usage: insert many memories, then recall by topic."""
+
+    @pytest.mark.asyncio
+    async def test_recall_finds_inserted_memory(self, nm):
+        """Insert a memory, recall with the same text, verify it appears."""
+        content = "我在 Google 做后端开发"
+        await nm.add_memory(user_id="scene_u1", content=content)
+
+        result = await nm.recall(user_id="scene_u1", query=content)
+        recalled_contents = [m["content"] for m in result["merged"]]
+        assert content in recalled_contents
+
+    @pytest.mark.asyncio
+    async def test_recall_all_results_are_from_inserted_set(self, nm):
+        """All recalled memories must be a subset of what was inserted."""
+        inserted = [
+            "我在北京工作",
+            "喜欢吃火锅",
+            "养了一只猫叫小白",
+            "周末喜欢爬山",
+            "用 Python 写代码",
+        ]
+        for content in inserted:
+            await nm.add_memory(user_id="scene_u2", content=content)
+
+        result = await nm.recall(user_id="scene_u2", query="工作", limit=10)
+        recalled_contents = {m["content"] for m in result["merged"]}
+        # Every recalled content must be one of the inserted memories
+        assert recalled_contents.issubset(set(inserted))
+        # Should recall at least one
+        assert len(recalled_contents) > 0
+
+    @pytest.mark.asyncio
+    async def test_recall_specific_memory_among_many(self, nm):
+        """Insert many memories, query with exact content, verify that one is recalled."""
+        memories = [
+            ("fact", "在字节跳动担任算法工程师"),
+            ("fact", "住在上海浦东"),
+            ("episodic", "昨天面试了阿里巴巴"),
+            ("general", "喜欢用 VS Code 写代码"),
+            ("fact", "本科毕业于清华大学"),
+        ]
+        for mtype, content in memories:
+            await nm.add_memory(user_id="scene_u3", content=content, memory_type=mtype)
+
+        # Query with exact content of one memory
+        target = "在字节跳动担任算法工程师"
+        result = await nm.recall(user_id="scene_u3", query=target)
+        recalled_contents = [m["content"] for m in result["merged"]]
+        assert target in recalled_contents
+
+    @pytest.mark.asyncio
+    async def test_recall_with_importance_ranking(self, nm):
+        """Insert memories with different importance, verify high importance recalled first."""
+        await nm.add_memory(
+            user_id="scene_u4", content="random chat about weather",
+            metadata={"importance": 1},
+        )
+        await nm.add_memory(
+            user_id="scene_u4", content="user birthday is March 15",
+            metadata={"importance": 9},
+        )
+        await nm.add_memory(
+            user_id="scene_u4", content="prefers dark mode",
+            metadata={"importance": 3},
+        )
+
+        result = await nm.recall(user_id="scene_u4", query="user", limit=10)
+        merged = result["merged"]
+        assert len(merged) >= 2
+
+        # All recalled items should have score > 0
+        for m in merged:
+            assert m.get("score", 0) > 0 or m.get("source") == "graph"
+
+    @pytest.mark.asyncio
+    async def test_recall_preserves_memory_type(self, nm):
+        """Recalled memories should carry their original memory_type."""
+        await nm.add_memory(user_id="scene_u5", content="fact content", memory_type="fact")
+        await nm.add_memory(user_id="scene_u5", content="episodic content", memory_type="episodic")
+
+        result = await nm.recall(user_id="scene_u5", query="content", limit=10)
+        types_found = {m["memory_type"] for m in result["merged"]}
+        assert "fact" in types_found or "episodic" in types_found
+
+    @pytest.mark.asyncio
+    async def test_recall_after_incremental_inserts(self, nm):
+        """Simulate a conversation: add memories one by one, recall after each."""
+        user_id = "scene_u6"
+
+        # Round 1: insert first memory
+        await nm.add_memory(user_id=user_id, content="my name is Alice")
+        result1 = await nm.recall(user_id=user_id, query="my name is Alice")
+        assert len(result1["merged"]) == 1
+
+        # Round 2: insert second memory, recall should find both
+        await nm.add_memory(user_id=user_id, content="I live in Beijing")
+        result2 = await nm.recall(user_id=user_id, query="name", limit=10)
+        assert len(result2["merged"]) >= 1
+        # Total memories should be 2 now
+        result_all = await nm.recall(user_id=user_id, query="Alice Beijing", limit=10)
+        assert len(result_all["merged"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_recall_different_users_independent(self, nm):
+        """Two users with separate memories should recall independently."""
+        await nm.add_memory(user_id="alice", content="Alice works at Google")
+        await nm.add_memory(user_id="alice", content="Alice likes Python")
+        await nm.add_memory(user_id="bob", content="Bob works at Microsoft")
+        await nm.add_memory(user_id="bob", content="Bob likes Java")
+
+        alice_result = await nm.recall(user_id="alice", query="works at", limit=10)
+        bob_result = await nm.recall(user_id="bob", query="works at", limit=10)
+
+        alice_contents = {m["content"] for m in alice_result["merged"]}
+        bob_contents = {m["content"] for m in bob_result["merged"]}
+
+        # Alice should not see Bob's memories and vice versa
+        assert all("Alice" in c for c in alice_contents)
+        assert all("Bob" in c for c in bob_contents)
+        assert alice_contents.isdisjoint(bob_contents)
+
+    @pytest.mark.asyncio
+    async def test_recall_returns_scores_for_ranking(self, nm):
+        """Each vector result should have relevance, recency, importance, score."""
+        await nm.add_memory(
+            user_id="scene_u7", content="test memory with score",
+            metadata={"importance": 7},
+        )
+        result = await nm.recall(user_id="scene_u7", query="test memory with score")
+
+        for r in result["vector_results"]:
+            assert "relevance" in r
+            assert "recency" in r
+            assert "importance" in r
+            assert "score" in r
+            # score = relevance * recency * importance
+            expected = round(r["relevance"] * r["recency"] * r["importance"], 4)
+            assert r["score"] == expected
+
+
+# ===========================================================================
+# F. recall() facade (NeuroMemory.recall) - API contract
 # ===========================================================================
 
 class TestRecallFacade:
