@@ -204,23 +204,63 @@ importance = metadata.importance / 10
 - 查询中提到的实体（如 "Google"）
 - 用户自身相关的实体关系
 
-**3. 合并策略**
+**3. 合并策略（recall() 实现）**
+
+`recall()` 自动执行混合检索并返回三部分结果：
 
 ```python
-# 1. 三因子找出相关记忆（事实、情景、洞察）
-vector_results = scored_search(query, limit=10)
+result = await nm.recall(user_id="alice", query="我在哪工作？", limit=10)
 
-# 2. 图中找出实体相关的记忆（关系、事实）
-graph_results = find_entity_facts(query, limit=10)
+# 返回格式
+{
+    "vector_results": [...],   # 三因子检索结果（带 score）
+    "graph_results": [...],    # 图实体检索结果
+    "merged": [...],           # 去重后的综合结果（推荐使用）
+}
 
-# 3. 按 content 去重合并，保留 top-N
-merged = deduplicate(vector_results + graph_results)[:limit]
+# 使用示例
+for memory in result["merged"]:
+    print(f"[{memory.get('source')}] {memory['content']}")
+    # 输出: [vector] 上周从 Google 离职了
+    #      [graph] Alice 在 Mountain View 工作过
+```
+
+**实现流程**：
+
+```python
+# 步骤 1: 三因子向量检索
+vector_results = await scored_search(
+    user_id, query, limit,
+    # 自动计算：relevance × recency × importance
+)
+
+# 步骤 2: 图实体检索（自动并行）
+graph_results = []
+if graph_enabled:
+    # 2.1 查询中提到的实体（如 "Google"）
+    entity_facts = await find_entity_facts(user_id, query, limit)
+    # 2.2 用户自身相关的关系
+    user_facts = await find_entity_facts(user_id, user_id, limit)
+    graph_results = entity_facts + user_facts
+
+# 步骤 3: 按 content 去重合并
+seen_contents = set()
+merged = []
+for r in vector_results:
+    if r['content'] not in seen_contents:
+        merged.append({**r, "source": "vector"})
+for r in graph_results:
+    if r['content'] not in seen_contents:
+        merged.append({**r, "source": "graph"})
+
+return {"vector_results": ..., "graph_results": ..., "merged": merged[:limit]}
 ```
 
 **为什么需要图检索？**
 - 向量检索擅长**语义匹配**："在 Google 工作" ≈ "工作地点"
 - 图检索擅长**结构化关系**：(alice)-[works_at]->(Google)-[located_in]->(Mountain View)
 - 两者互补，提供更全面的记忆召回
+- **去重机制**：避免同一记忆被重复返回
 
 **学术基础**：
 - **Generative Agents** (Stanford, 2023)：三因子检索
