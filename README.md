@@ -142,13 +142,13 @@ NeuroMemory 提供 7 种记忆类型，每种有不同的存储和获取方式�
 
 | 记忆类型 | 存储方式 | 底层存储 | 获取方式 | 示例 |
 |---------|---------|---------|---------|------|
-| **偏好** | KV Store | PostgreSQL `key_values` 表 | `nm.kv.get("preferences", user_id, key)` | `language=zh-CN` |
-| **事实** | Embedding + Graph | pgvector `embeddings` 表 + AGE 图 | `nm.recall(user_id, query)` | "在 Google 工作" |
-| **情景** | Embedding | pgvector `embeddings` 表 | `nm.recall(user_id, query)` | "昨天面试很紧张" |
-| **关系** | Graph Store | Apache AGE 图节点/边 | `nm.graph.get_neighbors(type, id)` | `(user)-[works_at]->(Google)` |
-| **洞察** | Embedding | pgvector `embeddings` 表 | `nm.search(user_id, query, memory_type="insight")` | "用户倾向于晚上工作" |
-| **情感画像** | Table | PostgreSQL `emotion_profiles` 表 | `reflect()` 自动更新 | "容易焦虑，对技术兴奋" |
-| **通用** | Embedding | pgvector `embeddings` 表 | `nm.search(user_id, query)` | 手动 `add_memory()` 的内容 |
+| **偏好** | KV Store | PostgreSQL | `nm.kv.get("preferences", user_id, key)` | `language=zh-CN` |
+| **事实** | Embedding + Graph | pgvector + Apache AGE | `nm.recall(user_id, query)` | "在 Google 工作" |
+| **情景** | Embedding | pgvector | `nm.recall(user_id, query)` | "昨天面试很紧张" |
+| **关系** | Graph Store | Apache AGE | `nm.graph.get_neighbors(type, id)` | `(user)-[works_at]->(Google)` |
+| **洞察** | Embedding | pgvector | `nm.search(user_id, query, memory_type="insight")` | "用户倾向于晚上工作" |
+| **情感画像** | Table | PostgreSQL | `reflect()` 自动更新 | "容易焦虑，对技术兴奋" |
+| **通用** | Embedding | pgvector | `nm.search(user_id, query)` | 手动 `add_memory()` 的内容 |
 
 ### 三因子混合检索
 
