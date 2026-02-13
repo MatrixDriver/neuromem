@@ -6,7 +6,7 @@
 - 可配置的自动记忆提取策略
 
 用法:
-    export LLM_API_KEY=your_key
+    export DEEPSEEK_API_KEY=your_key
     python example/chat_agent.py
 
 默认使用内置的 HashEmbedding（基于哈希，无需额外依赖，适合功能验证）。
@@ -112,9 +112,9 @@ def create_embedding_provider() -> EmbeddingProvider:
 
 
 def create_llm_provider():
-    api_key = os.getenv("LLM_API_KEY")
+    api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
-        raise ValueError("请设置 LLM_API_KEY 环境变量")
+        raise ValueError("请设置 DEEPSEEK_API_KEY 环境变量")
 
     return OpenAILLM(
         api_key=api_key,

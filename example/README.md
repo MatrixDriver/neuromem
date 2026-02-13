@@ -24,9 +24,9 @@ pip install -e ".[dev]"
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `DATABASE_URL` | PostgreSQL 连接地址 | `postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory` |
-| `LLM_API_KEY` | LLM API Key | **必填** |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key | **必填** |
+| `LLM_MODEL` | LLM 模型名 | `deepseek-chat` (DeepSeek V3.2) |
 | `LLM_BASE_URL` | LLM API 地址 | `https://api.deepseek.com/v1` |
-| `LLM_MODEL` | LLM 模型名 | `deepseek-chat` |
 
 ### Embedding
 
@@ -45,12 +45,12 @@ pip install sentence-transformers
 ## 运行
 
 ```bash
-# 使用 DeepSeek（默认）
-export LLM_API_KEY=your_deepseek_key
+# 使用 DeepSeek V3.2（默认）
+export DEEPSEEK_API_KEY=your_deepseek_key
 python example/chat_agent.py
 
-# 使用 OpenAI
-export LLM_API_KEY=your_openai_key
+# 使用 OpenAI（通过环境变量覆盖）
+export DEEPSEEK_API_KEY=your_openai_key
 export LLM_BASE_URL=https://api.openai.com/v1
 export LLM_MODEL=gpt-4o-mini
 python example/chat_agent.py
