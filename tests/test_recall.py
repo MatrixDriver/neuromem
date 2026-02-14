@@ -802,9 +802,10 @@ class TestRecallFullPipeline:
 
     @pytest.mark.asyncio
     async def test_reflect_extracts_and_marks_messages(self, nm_with_llm):
-        """reflect() should extract unprocessed conversations and mark them."""
+        """v0.2.0: add_message auto-extracts, reflect() generates insights."""
         user_id = "pipeline_u4"
 
+        # v0.2.0: add_message auto-extracts memories (auto_extract=True default)
         await nm_with_llm.conversations.add_message(
             user_id=user_id, role="user", content="我在 Google 工作",
         )
@@ -812,13 +813,17 @@ class TestRecallFullPipeline:
             user_id=user_id, role="assistant", content="了解了！",
         )
 
-        # reflect() does extraction + insight generation
-        result = await nm_with_llm.reflect(user_id=user_id, limit=50)
-        assert result["conversations_processed"] > 0
-
-        # Extracted facts should be recallable
+        # Memories should already be extracted and recallable
         recall_result = await nm_with_llm.recall(user_id=user_id, query="Google")
         assert len(recall_result["merged"]) > 0
+
+        # v0.2.0: reflect() only generates insights (no extraction)
+        result = await nm_with_llm.reflect(user_id=user_id, limit=50)
+        assert "insights_generated" in result
+        assert "insights" in result
+        assert "emotion_profile" in result
+        # v0.2.0: No longer returns extraction counters
+        assert "conversations_processed" not in result
 
     @pytest.mark.asyncio
     async def test_pipeline_multiple_conversations_accumulate(self, nm_with_llm):

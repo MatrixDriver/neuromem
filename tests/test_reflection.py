@@ -208,10 +208,14 @@ async def test_parse_insight_result_handles_invalid_json(db_session, mock_embedd
 
 @pytest.mark.asyncio
 async def test_reflect_facade_method(db_session, mock_embedding):
-    """Test the NeuroMemory.reflect() facade method with full memory consolidation."""
+    """Test NeuroMemory.reflect() v0.2.0 - generates insights from existing memories.
+
+    v0.2.0 behavior: reflect() only generates insights and updates emotion profile.
+    Basic memory extraction is handled by add_message() when auto_extract=True.
+    """
     from neuromemory import NeuroMemory
 
-    # Create NeuroMemory with LLM
+    # Create NeuroMemory with LLM and auto_extract disabled for manual control
     mock_llm = MockLLMProvider(
         insight_response='{"insights": [{"content": "test insight", "category": "pattern"}]}',
         emotion_response='{"latest_state": "test state", "dominant_emotions": {}, "emotion_triggers": {}}',
@@ -221,33 +225,34 @@ async def test_reflect_facade_method(db_session, mock_embedding):
         database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
         embedding=mock_embedding,
         llm=mock_llm,
+        auto_extract=False,  # Disable auto-extract for explicit control
     )
     await nm.init()
 
-    # Add some conversations (unextracted)
-    await nm.conversations.add_message(
+    # Manually add memories to the memory store
+    await nm.add_memory(
         user_id="facade_user",
-        role="user",
         content="I work at OpenAI on LLMs",
+        memory_type="fact",
     )
-    await nm.conversations.add_message(
+    await nm.add_memory(
         user_id="facade_user",
-        role="user",
         content="Yesterday was very stressful",
+        memory_type="episodic",
+        metadata={"emotion": {"valence": -0.6, "arousal": 0.7}},
     )
 
-    # Reflect should: 1) extract conversations, 2) generate insights, 3) update emotion profile
+    # v0.2.0: reflect() only generates insights and updates emotion profile
     result = await nm.reflect("facade_user", limit=10)
 
-    # Check extraction results
-    assert "conversations_processed" in result
-    assert "facts_added" in result
-    assert "preferences_updated" in result
-    assert "relations_added" in result
-
-    # Check insight generation
+    # Check insight generation (no extraction counters in v0.2.0)
     assert "insights_generated" in result
     assert "insights" in result
     assert "emotion_profile" in result
+    # v0.2.0: No longer returns extraction results
+    assert "conversations_processed" not in result
+    assert "facts_added" not in result
+    assert "preferences_updated" not in result
+    assert "relations_added" not in result
 
     await nm.close()
