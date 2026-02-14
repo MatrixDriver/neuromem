@@ -1,5 +1,7 @@
 """Conversation models for session storage."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
@@ -7,6 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import DateTime, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
+from pgvector.sqlalchemy import Vector
 
 from neuromemory.models.base import Base, TimestampMixin
 
@@ -26,6 +29,9 @@ class Conversation(Base, TimestampMixin):
     session_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(50), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Optional[list[float]]] = mapped_column(
+        Vector(None), nullable=True  # v0.2.0: Store conversation embeddings for recall
+    )
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
     extracted: Mapped[bool] = mapped_column(
         default=False, server_default=text("false")

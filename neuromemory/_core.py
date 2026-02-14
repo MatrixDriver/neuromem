@@ -92,18 +92,42 @@ class KVFacade:
 class ConversationsFacade:
     """Conversations facade."""
 
-    def __init__(self, db: Database, _on_message_added=None, _on_session_closed=None):
+    def __init__(
+        self,
+        db: Database,
+        _on_message_added=None,
+        _on_session_closed=None,
+        _auto_extract: bool = True,
+        _embedding: EmbeddingProvider | None = None,
+        _llm: LLMProvider | None = None,
+        _graph_enabled: bool = False,
+    ):
         self._db = db
         self._on_message_added = _on_message_added
         self._on_session_closed = _on_session_closed
+        self._auto_extract = _auto_extract
+        self._embedding = _embedding
+        self._llm = _llm
+        self._graph_enabled = _graph_enabled
 
     async def add_message(self, user_id: str, role: str, content: str, session_id: str | None = None, metadata: dict | None = None):
         from neuromemory.services.conversation import ConversationService
         async with self._db.session() as session:
             svc = ConversationService(session)
             msg = await svc.add_message(user_id, role, content, session_id, metadata)
+
+        # P1: Generate conversation embedding for recall (v0.2.0)
+        if self._embedding:
+            await self._generate_conversation_embedding(msg)
+
+        # Strategy-based extraction (old logic)
         if self._on_message_added:
             await self._on_message_added(user_id, msg.session_id, 1)
+
+        # Auto-extract (new logic, like mem0)
+        if self._auto_extract and self._llm and self._embedding:
+            await self._extract_single_message(user_id, msg.session_id, [msg])
+
         return msg
 
     async def add_messages_batch(self, user_id: str, messages: list[dict], session_id: str | None = None):
@@ -111,9 +135,74 @@ class ConversationsFacade:
         async with self._db.session() as session:
             svc = ConversationService(session)
             sid, ids = await svc.add_messages_batch(user_id, messages, session_id)
+
+        # Strategy-based extraction (old logic)
         if self._on_message_added:
             await self._on_message_added(user_id, sid, len(messages))
+
+        # Auto-extract (new logic, batch mode)
+        if self._auto_extract and self._llm and self._embedding:
+            # Get all messages in this session
+            async with self._db.session() as session:
+                svc = ConversationService(session)
+                all_messages = await svc.get_session_messages(user_id, sid, limit=1000)
+            await self._extract_batch(user_id, sid, all_messages)
+
         return sid, ids
+
+    async def _generate_conversation_embedding(self, msg):
+        """Generate and store embedding for conversation message (P1 feature).
+
+        This enables recall to search both extracted memories and original conversations.
+        """
+        from sqlalchemy import update
+        from neuromemory.models.conversation import Conversation
+        try:
+            embedding_vector = await self._embedding.embed(msg.content)
+            async with self._db.session() as session:
+                await session.execute(
+                    update(Conversation)
+                    .where(Conversation.id == msg.id)
+                    .values(embedding=embedding_vector)
+                )
+                await session.commit()
+            logger.debug(f"Generated conversation embedding for message {msg.id}")
+        except Exception as e:
+            logger.warning(f"Failed to generate conversation embedding: {e}")
+
+    async def _extract_single_message(self, user_id: str, session_id: str, messages: list):
+        """Extract memories from a single message (auto-extract mode)."""
+        from neuromemory.services.memory_extraction import MemoryExtractionService
+
+        async with self._db.session() as session:
+            extraction_svc = MemoryExtractionService(
+                session,
+                self._embedding,
+                self._llm,
+                graph_enabled=self._graph_enabled,
+            )
+            await extraction_svc.extract_from_messages(user_id, messages)
+
+        logger.debug(f"Auto-extracted memories for {user_id} from single message")
+
+    async def _extract_batch(self, user_id: str, session_id: str, messages: list):
+        """Extract memories from a batch of messages (auto-extract mode)."""
+        from neuromemory.services.memory_extraction import MemoryExtractionService
+
+        async with self._db.session() as session:
+            extraction_svc = MemoryExtractionService(
+                session,
+                self._embedding,
+                self._llm,
+                graph_enabled=self._graph_enabled,
+            )
+            result = await extraction_svc.extract_from_messages(user_id, messages)
+
+        logger.info(
+            f"Auto-extracted {result['facts_extracted']} facts, "
+            f"{result['preferences_extracted']} preferences, "
+            f"{result['episodes_extracted']} episodes from batch for {user_id}"
+        )
 
     async def close_session(self, user_id: str, session_id: str) -> None:
         """Close a conversation session, triggering memory extraction if configured."""
@@ -242,28 +331,42 @@ class GraphFacade:
 class NeuroMemory:
     """Main NeuroMemory facade - entry point for all operations.
 
+    Args:
+        database_url: PostgreSQL connection string
+        embedding: Embedding provider (SiliconFlow/OpenAI/SentenceTransformer)
+        llm: Optional LLM provider (for memory extraction)
+        storage: Optional object storage (for files)
+        extraction: Optional extraction strategy (for interval-based extraction)
+        auto_extract: If True, automatically extract memories on add_message (default: True, like mem0)
+        graph_enabled: Enable graph memory storage
+        pool_size: Database connection pool size
+        echo: Enable SQLAlchemy SQL logging
+
     Usage:
-        nm = NeuroMemory(
+        # Auto-extract mode (default, like mem0)
+        async with NeuroMemory(
             database_url="postgresql+asyncpg://...",
             embedding=SiliconFlowEmbedding(api_key="..."),
-        )
-        await nm.init()
+            llm=OpenAILLM(api_key="..."),
+            auto_extract=True,  # Default
+        ) as nm:
+            # Memories are extracted immediately
+            await nm.conversations.add_message(user_id="alice", role="user", content="I work at Google")
+            # → facts/preferences/episodes automatically extracted and stored
 
-        await nm.add_memory(user_id="u1", content="I work at Google")
-        results = await nm.search(user_id="u1", query="workplace")
+        # Manual extraction mode
+        async with NeuroMemory(..., auto_extract=False) as nm:
+            await nm.conversations.add_message(...)
+            # No extraction yet
+            await nm.extract_memories(user_id="alice")  # Manual trigger
 
-        await nm.close()
-
-    Or as async context manager:
-        async with NeuroMemory(...) as nm:
-            await nm.search(...)
-
-    With auto-extraction:
+        # Strategy-based extraction (interval-based)
         async with NeuroMemory(
             ...,
+            auto_extract=False,
             extraction=ExtractionStrategy(message_interval=10),
         ) as nm:
-            # Memories are auto-extracted every 10 messages
+            # Memories extracted every 10 messages
             await nm.conversations.add_message(...)
     """
 
@@ -274,6 +377,7 @@ class NeuroMemory:
         llm: Optional[LLMProvider] = None,
         storage: Optional[ObjectStorage] = None,
         extraction: Optional[ExtractionStrategy] = None,
+        auto_extract: bool = True,
         graph_enabled: bool = False,
         pool_size: int = 10,
         echo: bool = False,
@@ -287,6 +391,7 @@ class NeuroMemory:
         self._llm = llm
         self._storage = storage
         self._extraction = extraction
+        self._auto_extract = auto_extract
         self._graph_enabled = graph_enabled
 
         # Extraction state tracking
@@ -303,7 +408,13 @@ class NeuroMemory:
         # Sub-module facades
         self.kv = KVFacade(self._db)
         self.conversations = ConversationsFacade(
-            self._db, _on_message_added=on_msg, _on_session_closed=on_close,
+            self._db,
+            _on_message_added=on_msg,
+            _on_session_closed=on_close,
+            _auto_extract=auto_extract,
+            _embedding=embedding,
+            _llm=llm,
+            _graph_enabled=graph_enabled,
         )
         self.graph = GraphFacade(self._db)
 
@@ -517,18 +628,24 @@ class NeuroMemory:
         limit: int = 10,
         decay_rate: float | None = None,
     ) -> dict:
-        """Hybrid recall: three-factor scored search + graph entity lookup, merged and deduplicated.
+        """Hybrid recall: memories + conversations + graph, merged and deduplicated.
 
-        Uses scored_search (relevance x recency x importance) instead of pure vector search.
+        **v0.2.0 P1 Update**: Now searches both:
+        1. Extracted memories (three-factor: relevance × recency × importance)
+        2. Original conversation fragments (preserves dates, details)
+        3. Graph entity traversal
 
         Returns:
             {
-                "vector_results": [...],   # three-factor scored search
-                "graph_results": [...],    # graph entity traversal
-                "merged": [...],           # deduplicated merge
+                "vector_results": [...],       # extracted memories
+                "conversation_results": [...], # original conversations (P1)
+                "graph_results": [...],        # graph entities
+                "merged": [...],               # deduplicated merge
             }
         """
         from neuromemory.services.search import SearchService, DEFAULT_DECAY_RATE
+
+        # 1. Search extracted memories (existing)
         vector_results = []
         async with self._db.session() as session:
             svc = SearchService(session, self._embedding)
@@ -537,6 +654,12 @@ class NeuroMemory:
                 decay_rate=decay_rate or DEFAULT_DECAY_RATE,
             )
 
+        # 2. Search original conversations (P1: mem0-style)
+        conversation_results = await self._search_conversations(
+            user_id, query, limit,
+        )
+
+        # 3. Search graph entities
         graph_results: list[dict] = []
         if self._graph_enabled:
             from neuromemory.services.graph_memory import GraphMemoryService
@@ -560,6 +683,12 @@ class NeuroMemory:
                 seen_contents.add(content)
                 merged.append({**r, "source": "vector"})
 
+        for r in conversation_results:
+            content = r.get("content", "")
+            if content not in seen_contents:
+                seen_contents.add(content)
+                merged.append({**r, "source": "conversation"})
+
         for r in graph_results:
             content = r.get("content", "")
             if content and content not in seen_contents:
@@ -568,34 +697,92 @@ class NeuroMemory:
 
         return {
             "vector_results": vector_results,
+            "conversation_results": conversation_results,
             "graph_results": graph_results,
             "merged": merged[:limit],
         }
+
+    async def _search_conversations(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Search original conversation fragments (P1 feature).
+
+        This preserves temporal details, dates, and specific information that
+        may be lost during LLM extraction.
+        """
+        from sqlalchemy import text
+
+        try:
+            query_embedding = await self._embedding.embed(query)
+        except Exception as e:
+            logger.warning(f"Failed to generate query embedding for conversations: {e}")
+            return []
+
+        # Convert query_embedding to pgvector string format
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in query_embedding):
+            logger.warning("Invalid vector data: must contain only numeric values")
+            return []
+
+        vector_str = f"[{','.join(str(float(v)) for v in query_embedding)}]"
+
+        async with self._db.session() as session:
+            # Vector similarity search on conversations using raw SQL
+            # Note: vector_str must be interpolated, not bound as parameter
+            sql = text(
+                f"""
+                SELECT id, content, role, session_id, created_at, metadata,
+                       1 - (embedding <=> '{vector_str}'::vector) AS similarity
+                FROM conversations
+                WHERE user_id = :user_id
+                  AND embedding IS NOT NULL
+                ORDER BY embedding <=> '{vector_str}'::vector
+                LIMIT :limit
+            """
+            )
+
+            result = await session.execute(sql, {"user_id": user_id, "limit": limit})
+            rows = result.fetchall()
+
+            conversations = []
+            for row in rows:
+                conversations.append({
+                    "id": str(row.id),
+                    "content": row.content,
+                    "role": row.role,
+                    "session_id": row.session_id,
+                    "created_at": row.created_at,
+                    "metadata": row.metadata or {},
+                    "similarity": round(float(row.similarity), 4),
+                })
+
+            return conversations
 
     async def reflect(
         self,
         user_id: str,
         limit: int = 50,
     ) -> dict:
-        """Comprehensive memory consolidation: re-extract + generate insights + update profile.
+        """Generate insights and update emotion profile from existing memories.
 
-        This is a holistic reflection operation that:
-        1. Re-extracts unprocessed conversations (facts, preferences, relations)
-        2. Generates pattern/summary insights from all recent memories
-        3. Updates emotion profile from emotion-tagged memories
+        **v0.2.0 Update**: Simplified to focus on insight generation and emotion profiling.
+        Basic memory extraction (facts, preferences, relations) is now handled automatically
+        by `add_message()` when `auto_extract=True` (default).
+
+        This method performs:
+        1. Generates pattern/summary insights from recent memories
+        2. Updates emotion profile from emotion-tagged memories
 
         Requires LLM provider.
 
         Args:
             user_id: The user to reflect about.
-            limit: Max number of recent messages/memories to consider.
+            limit: Max number of recent memories to analyze.
 
         Returns:
             {
-                "conversations_processed": int,
-                "facts_added": int,
-                "preferences_updated": int,
-                "relations_added": int,
                 "insights_generated": int,
                 "insights": [{"content": "...", "category": "pattern|summary"}],
                 "emotion_profile": {"latest_state": "...", "valence_avg": ...}
@@ -604,39 +791,9 @@ class NeuroMemory:
         if not self._llm:
             raise RuntimeError("LLM provider required for reflection")
 
-        from neuromemory.services.conversation import ConversationService
-        from neuromemory.services.memory_extraction import MemoryExtractionService
         from neuromemory.services.reflection import ReflectionService
 
-        # Step 1: Re-extract unprocessed conversations
-        extraction_result = {
-            "conversations_processed": 0,
-            "facts_added": 0,
-            "preferences_updated": 0,
-            "relations_added": 0,
-        }
-
-        async with self._db.session() as session:
-            conv_svc = ConversationService(session)
-            unextracted = await conv_svc.get_unextracted_messages(user_id, limit=limit)
-
-            if unextracted:
-                extraction_svc = MemoryExtractionService(
-                    session, self._embedding, self._llm, self._graph_enabled
-                )
-                extract_result = await extraction_svc.extract_from_messages(
-                    user_id, unextracted
-                )
-                # Mark messages as extracted
-                msg_ids = [m.id for m in unextracted if hasattr(m, "id")]
-                if msg_ids:
-                    await conv_svc.mark_messages_extracted(msg_ids)
-                extraction_result["conversations_processed"] = len(unextracted)
-                extraction_result["facts_added"] = extract_result.get("facts_extracted", 0)
-                extraction_result["preferences_updated"] = extract_result.get("preferences_extracted", 0)
-                extraction_result["relations_added"] = extract_result.get("triples_extracted", 0)
-
-        # Step 2: Get all recent memories (including newly extracted ones)
+        # Step 1: Get all recent memories (already extracted by add_message)
         recent_memories: list[dict] = []
         async with self._db.session() as session:
             from sqlalchemy import text as sql_text
@@ -661,13 +818,12 @@ class NeuroMemory:
 
         if not recent_memories:
             return {
-                **extraction_result,
                 "insights_generated": 0,
                 "insights": [],
                 "emotion_profile": None,
             }
 
-        # Step 3: Get existing insights to avoid duplication
+        # Step 2: Get existing insights to avoid duplication
         existing_insights: list[dict] = []
         async with self._db.session() as session:
             result = await session.execute(
@@ -686,7 +842,7 @@ class NeuroMemory:
                     "metadata": row.metadata,
                 })
 
-        # Step 4: Generate insights and update emotion profile
+        # Step 3: Generate insights and update emotion profile
         async with self._db.session() as session:
             reflection_svc = ReflectionService(session, self._embedding, self._llm)
             reflection_result = await reflection_svc.reflect(
@@ -694,7 +850,6 @@ class NeuroMemory:
             )
 
         return {
-            **extraction_result,
             "insights_generated": len(reflection_result["insights"]),
             "insights": reflection_result["insights"],
             "emotion_profile": reflection_result["emotion_profile"],
