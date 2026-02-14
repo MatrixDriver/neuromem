@@ -83,21 +83,23 @@ async def main():
         database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
         embedding=SiliconFlowEmbedding(api_key="your-key"),
         llm=OpenAILLM(api_key="your-openai-key"),  # 用于自动提取记忆
+        auto_extract=True,  # 默认启用，像 mem0 那样实时提取记忆
     ) as nm:
-        # 1. 存储对话消息（推荐方式）
-        msg = await nm.conversations.add_message(
+        # 1. 存储对话消息 → 自动提取记忆（facts/preferences/episodes/relations）
+        await nm.conversations.add_message(
             user_id="alice", role="user",
             content="I work at ABC Company as a software engineer"
         )
+        # → 后台自动提取：fact: "在 ABC Company 工作", relation: (alice)-[works_at]->(ABC Company)
 
-        # 2. 提取记忆（从未提取的对话消息中提取）
-        messages = await nm.conversations.get_unextracted_messages(user_id="alice")
-        stats = await nm.extract_memories(user_id="alice", messages=messages)
-
-        # 3. 三因子检索（相关性 × 时效性 × 重要性）
+        # 2. 三因子检索（相关性 × 时效性 × 重要性）
         result = await nm.recall(user_id="alice", query="Where does Alice work?")
         for r in result["merged"]:
             print(f"[{r['score']:.2f}] {r['content']}")
+
+        # 3. 生成洞察和情感画像（可选，定期调用）
+        insights = await nm.reflect(user_id="alice")
+        print(f"生成了 {insights['insights_generated']} 条洞察")
 
 asyncio.run(main())
 ```
@@ -106,31 +108,35 @@ asyncio.run(main())
 
 NeuroMemory 的核心使用围绕三个操作：
 
-**插入记忆**：
-- 对话驱动：`add_message()` → `extract_memories(messages)`（LLM 自动分类，含情感标注和重要性评分）
+**插入记忆**（自动模式，默认）：
+- 对话驱动：`add_message()` 存储对话 **并自动提取记忆**（推荐，像 mem0）
 - 直接添加：`add_memory(user_id, content, memory_type)`（手动指定类型，不需要 LLM）
 
 **召回记忆（recall）**：
 - `await nm.recall(user_id, query)` — 综合考虑相关性、时效性、重要性，找出最匹配的记忆
 - 在对话中使用：让 agent 能"想起"相关的历史信息来回应用户
 
-**整理记忆（reflect）**：
-- `await nm.reflect(user_id)` — 三步操作：
-  1. **查漏补缺**：重新提取未处理的对话
-  2. **提炼洞察**：从近期记忆生成高层理解（行为模式、阶段总结）
-  3. **更新画像**：整合情感数据，更新用户情感画像
-- 让记忆从"流水账"升华为"理解"
+**生成洞察（reflect）**（可选，定期调用）：
+- `await nm.reflect(user_id)` — 高层记忆分析：
+  1. **提炼洞察**：从已提取的记忆生成高层理解（行为模式、阶段总结）
+  2. **更新画像**：整合情感数据，更新用户情感画像
+- 让记忆从"事实"升华为"洞察"
+
+> **关键变化**（v0.2.0）：`add_message()` 现在默认自动提取记忆（`auto_extract=True`），无需手动调用 `extract_memories()` 或 `reflect()`。`reflect()` 专注于生成洞察和情感画像，不再提取基础记忆。
 
 **逻辑关系**：
 ```
-对话进行中 → 插入记忆 (add_message + extract_memories)
+对话进行中 → 存储消息 (add_message) → 自动提取记忆
      ↓
 agent 需要上下文 → 召回记忆 (recall)
      ↓
-积累一定量后 → 整理记忆 (reflect) → 生成洞察 + 更新画像
+定期分析 → 生成洞察 (reflect) → 洞察 + 情感画像
 ```
 
-通过 `ExtractionStrategy` 可以配置自动触发时机（如每 10 条消息提取，每 50 次提取后反思），也可以完全手动控制。
+**配置选项**：
+- **自动模式**（默认，推荐）：`auto_extract=True`，每次 `add_message` 都提取记忆
+- **手动模式**：`auto_extract=False`，手动调用 `extract_memories()`
+- **策略模式**：`auto_extract=False` + `ExtractionStrategy(message_interval=10)`，每 10 条消息触发
 
 ---
 
@@ -226,16 +232,15 @@ NeuroMemory 有三组容易混淆的 API，以下是快速对比：
 
 | API | 用途 | 写入目标 | 何时使用 |
 |-----|------|---------|---------|
-| **add_message()** ⭐ | 存储对话消息 | 对话历史 → 后续通过 `extract_memories()` 自动提取记忆 | **日常使用（推荐）** |
+| **add_message()** ⭐ | 存储对话消息 | 对话历史 → 后续通过 `reflect()` 提取记忆 | **日常使用（推荐）** |
 | **add_memory()** | 直接写入记忆 | 记忆表（embedding），立即可检索 | 手动导入、批量初始化、已知结构化信息 |
 
 ```python
-# add_message(): 对话驱动（推荐）— 先存对话，再提取记忆
+# add_message(): 对话驱动（推荐）— 先存对话，再用 reflect() 提取记忆
 await nm.conversations.add_message(user_id="alice", role="user",
     content="我在 Google 工作，做后端开发")
-messages = await nm.conversations.get_unextracted_messages(user_id="alice")
-await nm.extract_memories(user_id="alice", messages=messages)
-# → 自动提取: fact: "在 Google 工作" + 情感标注 + 重要性评分
+await nm.reflect(user_id="alice")
+# → 自动提取: fact: "在 Google 工作" + 情感标注 + 重要性评分 + 洞察
 
 # add_memory(): 直接写入（手动指定一切）
 await nm.add_memory(user_id="alice", content="在 Google 工作",
@@ -259,23 +264,23 @@ results = await nm.search(user_id="alice", query="工作")
 # → "去年在微软实习" 和 "昨天面试 Google" 都可能返回，只按相似度排序
 ```
 
-### 🧠 记忆管理 API：extract_memories() vs reflect()
+### 🧠 记忆管理 API：reflect() vs extract_memories()
 
 | API | 用途 | 处理内容 | 何时使用 |
 |-----|------|---------|---------|
-| **extract_memories()** | 提取新记忆 | 从对话中提取事实/偏好/关系 | **每次对话后** |
-| **reflect()** | 整理已有记忆 | 重新提取 + 生成洞察 + 更新画像 | **定期整理**（每天/每周） |
+| **reflect()** ⭐ | 一站式记忆处理 | 提取事实/偏好/关系 + 生成洞察 + 更新画像 | **推荐使用**：手动处理记忆时 |
+| **extract_memories()** | 仅提取新记忆 | 从对话中提取事实/偏好/关系（不生成洞察） | 底层方法：由 `ExtractionStrategy` 自动调用 |
 
 ```python
-# extract_memories(): 获取未提取的消息，然后提取记忆
+# reflect(): 推荐 — 一站式处理（提取 + 洞察 + 画像）
 await nm.conversations.add_message(user_id="alice", role="user", content="我在 Google 工作")
-messages = await nm.conversations.get_unextracted_messages(user_id="alice")
-await nm.extract_memories(user_id="alice", messages=messages)
+result = await nm.reflect(user_id="alice")
 # → 提取: fact: "在 Google 工作", relation: (alice)-[works_at]->(Google)
+# → 洞察: "用户近期求职，面试了 Google 和微软"
+# → 画像: 更新情感状态
 
-# reflect(): 整理所有记忆，生成洞察
-await nm.reflect(user_id="alice")
-# → 重新提取遗漏对话 + 生成洞察: "用户近期求职，面试了 Google 和微软"
+# extract_memories(): 底层方法（通常不需要直接调用）
+# 由 ExtractionStrategy 自动调用，用于高频轻量的增量提取
 ```
 
 ### 策略配置（ExtractionStrategy）
@@ -322,12 +327,13 @@ class MemoryAgent:
     async def chat(self, user_id: str, user_input: str) -> str:
         """处理用户输入，返回 agent 回复"""
 
-        # === 步骤 1：存储用户消息 ===
+        # === 步骤 1：存储用户消息（自动提取记忆）===
         await self.nm.conversations.add_message(
             user_id=user_id,
             role="user",
             content=user_input
         )
+        # → 如果启用 auto_extract，记忆已自动提取
 
         # === 步骤 2：召回相关记忆 ===
         recall_result = await self.nm.recall(user_id=user_id, query=user_input, limit=5)
@@ -385,10 +391,7 @@ async def main():
         database_url="postgresql+asyncpg://...",
         embedding=SiliconFlowEmbedding(api_key="..."),
         llm=OpenAILLM(api_key="..."),
-        extraction=ExtractionStrategy(
-            message_interval=10,       # 每 10 条消息自动提取记忆
-            reflection_interval=50,    # 每 50 次提取后自动反思
-        )
+        auto_extract=True,  # 默认启用，每次 add_message 都提取记忆（推荐）
     ) as nm:
         agent = MemoryAgent(nm, AsyncOpenAI(api_key="..."))
 
@@ -396,23 +399,25 @@ async def main():
         reply1 = await agent.chat("alice", "我在 Google 工作，做后端开发，最近压力有点大")
         print(f"Agent: {reply1}")
 
-        # 自动提取记忆（达到 message_interval 时触发）
-        # → fact: "在 Google 工作", episodic: "最近压力有点大", relation: (alice)-[works_at]->(Google)
+        # → add_message 自动提取记忆：
+        #   fact: "在 Google 工作", episodic: "最近压力有点大"
+        #   relation: (alice)-[works_at]->(Google)
 
         # 第二轮对话（几天后）— agent 能"记住"之前的对话
         reply2 = await agent.chat("alice", "有什么减压的建议吗？")
         print(f"Agent: {reply2}")
 
-        # 定期反思整理
+        # 定期生成洞察（可选，如每天晚上或每 100 条消息）
         result = await nm.reflect(user_id="alice")
         print(f"生成了 {result['insights_generated']} 条洞察")
 ```
 
 **关键点**：
-1. **召回记忆**：每次对话前用 `recall()` 找出相关记忆
-2. **注入 prompt**：将记忆作为 context 注入到 LLM 的 system prompt
-3. **自动提取**：`ExtractionStrategy` 在后台自动提取和整理记忆
-4. **持续学习**：agent 随着对话增加，对用户的理解越来越深入
+1. **实时提取**：`auto_extract=True` 让每次 `add_message` 都立即提取记忆（像 mem0）
+2. **召回记忆**：每次对话前用 `recall()` 找出相关记忆
+3. **注入 prompt**：将记忆作为 context 注入到 LLM 的 system prompt
+4. **生成洞察**：定期调用 `reflect()` 提炼高层洞察和更新情感画像
+5. **持续学习**：agent 随着对话增加，对用户的理解越来越深入
 
 ---
 
@@ -519,6 +524,8 @@ ObjectStorage (ABC)
 
 ### Phase 3（规划中）
 
+- [ ] 基准测试：LoCoMo（ACL 2024，长对话记忆评测，10 组多轮对话 + 1986 个 QA）
+- [ ] 基准测试：LongMemEval（ICLR 2025，超长记忆评测，500 个问题，115k~1.5M tokens）
 - [ ] 自然遗忘（主动记忆清理/归档机制）
 - [ ] 多模态 embedding（图片、音频）
 - [ ] 分布式部署支持

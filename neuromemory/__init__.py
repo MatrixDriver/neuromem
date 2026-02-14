@@ -1,5 +1,7 @@
 """NeuroMemory - Memory management framework for AI agents."""
 
+__version__ = "0.2.0"
+
 from neuromemory._core import ExtractionStrategy, NeuroMemory
 from neuromemory.db import Database
 from neuromemory.models.emotion_profile import EmotionProfile

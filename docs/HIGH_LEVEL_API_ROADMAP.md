@@ -11,107 +11,80 @@
 
 ## 📅 分阶段实施计划
 
-### Phase 1: 会话存储 + 基础记忆提取 （4-6 周）
+### Phase 1: 会话存储 + 基础记忆提取 （4-6 周）✅ **已完成（v0.2.0）**
 
-#### 1.1 会话存储 (1-2 周)
+#### 1.1 会话存储 (1-2 周) ✅
 
 **后端实现：**
-- [ ] 设计会话数据模型 (KV 存储)
-  ```sql
-  CREATE TABLE conversations (
-      id UUID PRIMARY KEY,
-      tenant_id UUID,
-      user_id VARCHAR,
-      session_id VARCHAR,
-      role VARCHAR,  -- user/assistant/system
-      content TEXT,
-      metadata JSONB,
-      created_at TIMESTAMP
-  );
+- [x] 设计会话数据模型
+  - `ConversationMessage` 和 `ConversationSession` 模型
+  - 支持 user_id 隔离（无 tenant_id）
+  - 索引优化：按 user_id + session_id
 
-  CREATE INDEX idx_conversations_session ON conversations(tenant_id, user_id, session_id);
-  ```
-
-- [ ] 实现会话 API 端点
-  - `POST /v1/conversations/messages` - 添加单条消息
-  - `POST /v1/conversations/batch` - 批量添加
-  - `GET /v1/conversations/sessions/{session_id}` - 获取会话历史
-  - `GET /v1/conversations/sessions` - 列出所有会话
+- [x] 实现会话 API（Python 框架）
+  - `conversations.add_message()` - 添加单条消息
+  - `conversations.add_messages_batch()` - 批量添加
+  - `conversations.get_session_messages()` - 获取会话历史
+  - `conversations.list_sessions()` - 列出所有会话
+  - `conversations.close_session()` - 关闭会话
 
 **Python SDK：**
-- [x] `conversations.py` 模块（已创建示例）
-- [ ] 集成到主 Client
-- [ ] 单元测试
-
-**预计工时：** 1-2 周
+- [x] `conversations.py` 模块（ConversationService）
+- [x] ConversationsFacade 集成到 NeuroMemory 主类
+- [x] 单元测试（test_conversations.py）
 
 ---
 
-#### 1.2 LLM Classifier 集成 (2-3 周)
+#### 1.2 LLM Classifier 集成 (2-3 周) ✅
 
 **核心功能：**
-- [ ] LLM Classifier 服务
-  ```python
-  class MemoryClassifier:
-      def classify_message(self, message: str) -> Dict:
-          """分类单条消息，识别记忆类型"""
-          prompt = f"""
-          分析以下对话，提取记忆信息：
+- [x] **MemoryExtractionService** - LLM 记忆提取服务
+  - 支持多语言提取（中文/英文，自动检测或 KV 偏好）
+  - 提取类型：Facts, Preferences, Episodes, Triples（图关系）
+  - 自动标注：重要性评分、情感标注（valence/arousal）
+  - 实现：`neuromemory/services/memory_extraction.py`
 
-          消息: {message}
+- [x] **自动提取机制（v0.2.0）**
+  - `auto_extract=True`（默认）：每次 `add_message()` 自动提取
+  - 同步提取，立即可检索
+  - 无需手动调用 `extract_memories()`
 
-          请提取：
-          1. 用户偏好（喜好、习惯）
-          2. 事实信息（工作、技能、爱好）
-          3. 情景记忆（事件、经历）
+- [x] 提取策略配置
+  - **实时提取**（推荐）：`auto_extract=True`
+  - **手动提取**：`auto_extract=False` + 手动 `reflect()`
+  - ~~任务队列~~ - v0.2.0 采用同步提取，简化架构
 
-          以 JSON 格式返回。
-          """
-          # 调用 Claude/GPT
-          return parse_llm_response(...)
-
-      def batch_extract(self, session_id: str) -> ExtractionResult:
-          """批量提取会话中的记忆"""
-          messages = get_session_messages(session_id)
-          # 分批处理，避免上下文过长
-          ...
-  ```
-
-- [ ] 记忆提取任务队列
-  - 使用 Celery 或类似工具
-  - 支持异步和定时触发
-
-- [ ] 提取策略配置
-  - `realtime` - 实时提取（每条消息）
-  - `batch` - 批量提取（每 N 条消息）
-  - `scheduled` - 定时提取（每小时/每天）
-
-**API 端点：**
-- [ ] `POST /v1/conversations/auto-extract` - 配置自动提取
-- [ ] `POST /v1/conversations/extract` - 手动触发提取
-- [ ] `GET /v1/tasks/{task_id}` - 查询任务状态
-
-**预计工时：** 2-3 周
+**Python API：**
+- [x] `conversations.add_message()` - 自动提取（默认）
+- [x] `extract_memories()` - 手动触发（内部使用）
+- [x] `reflect()` - 生成洞察 + 更新画像
 
 ---
 
-#### 1.3 记忆分类存储 (1 周)
+#### 1.3 记忆分类存储 (1 周) ✅
 
 **存储映射：**
-- [ ] 偏好 → `preferences` 表
-- [ ] 事实 → `embeddings` 表（带 fact 标签）
-- [ ] 情景 → `embeddings` 表（带 episodic 标签 + 时间戳）
+- [x] 所有记忆类型统一存储在 `Embedding` 表
+  - `memory_type`: fact / preference / episodic / insight / general
+  - `metadata`: 包含 importance, emotion, tags 等
 
-**数据模型增强：**
-```sql
-ALTER TABLE embeddings
-ADD COLUMN memory_type VARCHAR,  -- fact/episodic/semantic
-ADD COLUMN extracted_from VARCHAR,  -- conversation/document/url
-ADD COLUMN confidence FLOAT,  -- LLM 置信度
-ADD COLUMN source_session_id VARCHAR;  -- 来源会话
+**数据模型：**
+```python
+class Embedding:
+    id: UUID
+    user_id: str
+    content: str
+    memory_type: str  # fact/episodic/preference/insight/general
+    embedding: Vector  # pgvector
+    metadata: dict  # importance, emotion, tags, source_session_id
+    created_at: datetime
 ```
 
-**预计工时：** 1 周
+**已实现特性：**
+- [x] 情感标注（valence, arousal）
+- [x] 重要性评分（1-10）
+- [x] 来源追踪（source_session_id）
+- [x] 时间索引（created_at）
 
 ---
 
@@ -249,7 +222,54 @@ class URLProcessor:
 
 ---
 
-### Phase 3: 高级检索 + 记忆画像 （2-3 周）
+### Phase 3: 基准测试 + 高级检索 + 记忆画像 （3-5 周）
+
+#### 3.0 基准测试（LoCoMo + LongMemEval）(1-2 周)
+
+使用学术界标准基准测试评估 NeuroMemory 的记忆召回质量，与 mem0、Zep 等框架横向对比。
+
+**LoCoMo**（ACL 2024，Long Conversation Memory）：
+- 论文：[arXiv:2402.17753](https://arxiv.org/abs/2402.17753)
+- 数据集：10 组多轮多 session 对话（400-680 轮/组），1986 个 QA 对
+- 5 类问题：多跳推理(282)、时间推理(321)、开放域(96)、单跳(841)、对抗性(446)
+- 评测流程：
+  1. **记忆注入**：按 session 逐轮喂入对话，调用 `add_message()` + `extract_memories()`
+  2. **问答检索**：对每个 QA，调用 `recall()` 召回相关记忆，LLM 生成回答
+  3. **评分**：Token F1 + BLEU-1 + LLM Judge（GPT-4o 二元判定）
+- 参考实现：[mem0/evaluation](https://github.com/mem0ai/mem0/tree/main/evaluation)
+
+**LongMemEval**（ICLR 2025，超长记忆评测）：
+- 论文：[arXiv:2410.10813](https://arxiv.org/abs/2410.10813)
+- 数据集：500 个问题，对话长度 115k~1.5M tokens
+- 5 类能力：信息提取、多 session 推理、时间推理、知识更新、拒答
+- 比 LoCoMo 更长更难（商业系统准确率仅 30-70%）
+- 参考实现：[xiaowu0162/LongMemEval](https://github.com/xiaowu0162/LongMemEval)
+
+**实现计划：**
+```
+evaluation/
+  dataset/
+    locomo10.json            # LoCoMo 数据集
+    longmemeval/             # LongMemEval 数据集
+  src/
+    neuromemory_add.py       # 记忆注入：对话 → add_message → extract_memories
+    neuromemory_search.py    # 问答检索：recall → LLM 生成回答
+  metrics/
+    f1.py                    # Token F1
+    bleu.py                  # BLEU-1
+    llm_judge.py             # GPT-4o 二元判定
+  run_eval.py                # 主评测脚本
+  generate_scores.py         # 按类别汇总分数
+```
+
+- [ ] 搭建评测框架（数据加载、结果保存、指标计算）
+- [ ] 实现 LoCoMo 评测（记忆注入 + 问答 + 评分）
+- [ ] 实现 LongMemEval 评测
+- [ ] 与 mem0、Zep 结果横向对比
+
+**预计工时：** 1-2 周
+
+---
 
 #### 3.1 跨类型统一检索 (1 周)
 
@@ -393,19 +413,20 @@ class UserProfile:
 |------|---------|---------|---------|
 | Phase 1 | 会话存储 + 记忆提取 | 4-6 周 | 2 后端 + 1 LLM |
 | Phase 2 | 文件系统 + URL | 3-4 周 | 2 后端 |
-| Phase 3 | 高级检索 + 画像 | 2-3 周 | 2 后端 |
+| Phase 3 | 基准测试 + 高级检索 + 画像 | 3-5 周 | 2 后端 |
 | Phase 4 | 优化和扩展 | 2-3 周 | 2 后端 + 1 前端 |
-| **总计** | | **11-16 周** | **2-3 人** |
+| **总计** | | **12-18 周** | **2-3 人** |
 
 ---
 
 ## 🎯 里程碑
 
-### M1: MVP（6 周）
+### M1: MVP（6 周）✅ **已完成（v0.2.0）**
 - ✅ 会话存储
-- ✅ 基础 LLM 提取（偏好 + 事实）
-- ✅ 统一检索 API
-- ✅ Python SDK
+- ✅ 自动记忆提取（auto_extract）
+- ✅ 统一检索 API（recall + search）
+- ✅ Python 框架（非 SDK，直接嵌入）
+- ✅ 多语言支持（中文/英文）
 
 ### M2: 文件系统（9 周）
 - ✅ 文档上传和管理

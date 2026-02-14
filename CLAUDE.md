@@ -95,35 +95,44 @@ pytest tests/ -m "not slow"
 ```python
 from neuromemory import NeuroMemory, SiliconFlowEmbedding, OpenAILLM, S3Storage
 
-nm = NeuroMemory(
+# 默认模式：自动提取（推荐）
+async with NeuroMemory(
     database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
     embedding=SiliconFlowEmbedding(api_key="..."),
-    llm=OpenAILLM(api_key="...", model="deepseek-chat"),  # 可选
+    llm=OpenAILLM(api_key="...", model="deepseek-chat"),  # 必需（自动提取）
     storage=S3Storage(endpoint="http://localhost:9000"),    # 可选
+    auto_extract=True,  # 默认，每次 add_message 自动提取
+) as nm:
+    # 对话管理（自动提取记忆）
+    await nm.conversations.add_message(user_id="u1", role="user", content="I work at Google")
+    # → 自动提取: fact: "在 Google 工作"
+
+    # 召回记忆（立即可用）
+    result = await nm.recall(user_id="u1", query="workplace")
+
+    # KV 存储
+    await nm.kv.set("preferences", "u1", "language", "zh-CN")
+    lang = await nm.kv.get("preferences", "u1", "language")
+
+    # 定期生成洞察（可选）
+    await nm.reflect(user_id="u1")  # 生成行为模式和阶段总结
+
+    # 文件上传 (需要 storage)
+    await nm.files.upload(user_id="u1", filename="doc.pdf", file_data=data)
+
+    # 图数据库
+    await nm.graph.create_node(node_type=NodeType.USER, node_id="u1")
+
+# 手动模式：关闭自动提取
+nm = NeuroMemory(
+    database_url="...",
+    embedding=SiliconFlowEmbedding(api_key="..."),
+    llm=OpenAILLM(api_key="..."),
+    auto_extract=False,  # 关闭自动提取
 )
 await nm.init()
-
-# 记忆存储和检索
-await nm.add_memory(user_id="u1", content="I work at Google")
-results = await nm.search(user_id="u1", query="workplace")
-
-# KV 存储
-await nm.kv.set("preferences", "u1", "language", "zh-CN")
-await nm.kv.get("preferences", "u1", "language")
-
-# 对话管理
 await nm.conversations.add_message(user_id="u1", role="user", content="Hello")
-
-# 文件上传 (需要 storage)
-await nm.files.upload(user_id="u1", filename="doc.pdf", file_data=data)
-
-# 图数据库
-await nm.graph.create_node(node_type=NodeType.USER, node_id="u1")
-
-# 上下文管理器
-async with NeuroMemory(...) as nm:
-    await nm.search(...)
-
+await nm.reflect(user_id="u1")  # 手动提取 + 生成洞察
 await nm.close()
 ```
 
