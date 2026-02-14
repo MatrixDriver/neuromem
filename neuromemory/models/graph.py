@@ -15,8 +15,10 @@ class NodeType(str, Enum):
     MEMORY = "Memory"
     CONCEPT = "Concept"
     ENTITY = "Entity"
+    PERSON = "Person"  # v0.2.0: For people mentioned in episodes
     ORGANIZATION = "Organization"
     LOCATION = "Location"
+    EVENT = "Event"  # v0.2.0: For episode events
     SKILL = "Skill"
 
 
@@ -32,6 +34,12 @@ class EdgeType(str, Enum):
     STUDIED_AT = "STUDIED_AT"
     BELONGS_TO = "BELONGS_TO"
     USES = "USES"
+    # Episode-specific relations (v0.2.0)
+    MET = "MET"  # user met someone
+    ATTENDED = "ATTENDED"  # user attended an event
+    VISITED = "VISITED"  # user visited a place
+    OCCURRED_AT = "OCCURRED_AT"  # episode occurred at a location
+    OCCURRED_ON = "OCCURRED_ON"  # episode occurred on a date
     CUSTOM = "CUSTOM"
 
 

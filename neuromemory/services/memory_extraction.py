@@ -86,7 +86,11 @@ class MemoryExtractionService:
     ) -> dict[str, list[dict]]:
         """Classify messages using LLM."""
         conversation_text = self._format_conversation(messages)
-        prompt = self._build_classification_prompt(conversation_text, user_id)
+
+        # Determine extraction language (KV preference > auto-detect > default)
+        language = await self._get_extraction_language(user_id, conversation_text)
+
+        prompt = self._build_classification_prompt(conversation_text, language)
 
         try:
             result_text = await self._llm.chat(
@@ -108,17 +112,91 @@ class MemoryExtractionService:
             lines.append(f"{role}: {content}")
         return "\n".join(lines)
 
-    def _build_classification_prompt(self, conversation: str, user_id: str) -> str:
+    async def _get_extraction_language(
+        self,
+        user_id: str,
+        conversation_text: str,
+    ) -> str:
+        """
+        Determine extraction prompt language.
+
+        Priority:
+        1. KV user preference (persistent setting)
+        2. Auto-detect current conversation language
+        3. Default "en"
+        """
+        # Check KV preference
+        kv_service = KVService(self.db)
+        lang_kv = await kv_service.get("preferences", user_id, "language")
+
+        if lang_kv and lang_kv.value in ["en", "zh"]:
+            # If preference exists, check if language switched
+            detected = self._detect_language(conversation_text)
+            if detected != lang_kv.value:
+                # Language switch: update preference if high confidence
+                confidence = self._detect_language_confidence(conversation_text)
+                if confidence > 0.8:
+                    logger.info(
+                        f"Language preference updated: {user_id} {lang_kv.value} → {detected}"
+                    )
+                    await kv_service.set("preferences", user_id, "language", detected)
+                    return detected
+            return lang_kv.value
+
+        # First time: auto-detect and save
+        detected = self._detect_language(conversation_text)
+        await kv_service.set("preferences", user_id, "language", detected)
+        return detected
+
+    def _detect_language(self, text: str) -> str:
+        """Simple language detection based on Chinese character ratio."""
+        if not text:
+            return "en"
+
+        chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+        ratio = chinese_chars / len(text)
+        return "zh" if ratio > 0.3 else "en"
+
+    def _detect_language_confidence(self, text: str) -> float:
+        """
+        Language detection confidence (0-1).
+
+        Returns high confidence if one language dominates (>80%).
+        """
+        if not text:
+            return 0.5
+
+        chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+        english_chars = sum(1 for c in text if c.isalpha() and c.isascii())
+        total = chinese_chars + english_chars
+
+        if total == 0:
+            return 0.5
+
+        zh_ratio = chinese_chars / total
+        en_ratio = english_chars / total
+        return max(zh_ratio, en_ratio)
+
+    def _build_classification_prompt(self, conversation: str, language: str) -> str:
+        """Build classification prompt in the specified language."""
+        if language == "zh":
+            return self._build_zh_prompt(conversation)
+        else:
+            return self._build_en_prompt(conversation)
+
+    def _build_zh_prompt(self, conversation: str) -> str:
+        """Build Chinese classification prompt (original)."""
         triples_section = ""
         triples_output = ""
         if self._graph_enabled:
             triples_section = """
-5. **Triples（实体关系三元组）**: 从 Facts 中提取的结构化关系
-   - 格式: {{"subject": "主体", "subject_type": "类型", "relation": "关系", "object": "客体", "object_type": "类型", "content": "原始事实", "confidence": 0.0-1.0}}
-   - subject_type/object_type 可选: user, person, organization, location, skill, concept, entity
-   - relation 用英文小写下划线，如 works_at, lives_in, has_skill, studied_at, uses, knows
+5. **Triples（实体关系三元组）**: 从 Facts 和 Episodes 中提取的结构化关系
+   - 格式: {{"subject": "主体", "subject_type": "类型", "relation": "关系", "object": "客体", "object_type": "类型", "content": "原始描述", "confidence": 0.0-1.0}}
+   - subject_type/object_type 可选: user, person, organization, location, event, skill, concept, entity
+   - Facts 关系: works_at, lives_in, has_skill, studied_at, uses, knows
+   - Episodes 关系: met (见面), attended (参加), visited (访问), occurred_at (发生地点), occurred_on (发生时间)
    - 用户自身 subject 填 "user"，subject_type 填 "user"
-   - 每个 Fact 尽量提取对应的 triple"""
+   - 每个 Fact 和 Episode 尽量提取对应的 triple"""
             triples_output = ',\n  "triples": [...]'
 
         return f"""分析以下对话，提取用户的记忆信息。请严格按照 JSON 格式返回结果。
@@ -141,7 +219,9 @@ class MemoryExtractionService:
    - emotion: 如果对话中有明显情感色彩则填写，否则设为 null。valence: 正面(1.0)/负面(-1.0)，arousal: 高兴奋(1.0)/低兴奋(0.0)
 
 3. **Episodes（情景）**: 事件、经历、时间相关信息
-   - 格式: {{"content": "事件描述", "timestamp": "时间信息或null", "confidence": 0.0-1.0, "importance": 1-10, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
+   - 格式: {{"content": "事件描述", "timestamp": "时间信息或null", "people": ["人名1", "人名2"], "location": "地点或null", "confidence": 0.0-1.0, "importance": 1-10, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
+   - people: 事件中涉及的人物列表（不包括用户自己）
+   - location: 事件发生的地点
    - importance 和 emotion 同 Facts 定义
 
 4. **注意事项**:
@@ -156,6 +236,66 @@ class MemoryExtractionService:
 - 必须返回有效的 JSON 格式，不要有其他文字说明
 
 返回格式（只返回 JSON，不要其他内容）：
+```json
+{{
+  "preferences": [...],
+  "facts": [...],
+  "episodes": [...]{triples_output}
+}}
+```"""
+
+    def _build_en_prompt(self, conversation: str) -> str:
+        """Build English classification prompt for English conversations."""
+        triples_section = ""
+        triples_output = ""
+        if self._graph_enabled:
+            triples_section = """
+5. **Triples (Entity-Relation Triples)**: Structured relationships extracted from Facts and Episodes
+   - Format: {{"subject": "entity", "subject_type": "type", "relation": "relation", "object": "entity", "object_type": "type", "content": "original description", "confidence": 0.0-1.0}}
+   - subject_type/object_type options: user, person, organization, location, event, skill, concept, entity
+   - Facts relations: works_at, lives_in, has_skill, studied_at, uses, knows
+   - Episodes relations: met (met someone), attended (attended event), visited (visited place), occurred_at (location), occurred_on (time)
+   - For user's own: subject="user", subject_type="user"
+   - Extract corresponding triple for each Fact and Episode when possible"""
+            triples_output = ',\n  "triples": [...]'
+
+        return f"""Extract structured memory information from the following conversation. Return results strictly in JSON format.
+
+Conversation:
+```
+{conversation}
+```
+
+Extract the following memories:
+
+1. **Preferences**: User's likes, dislikes, habits, settings
+   - Format: {{"key": "preference_name", "value": "preference_value", "confidence": 0.0-1.0}}
+   - Key should be in English, value can be in any language
+
+2. **Facts**: Objective information about the user
+   - Format: {{"content": "fact description", "category": "category", "confidence": 0.0-1.0, "importance": 1-10, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
+   - Category options: work, skill, hobby, personal, education, location
+   - Importance: significance to user's life (1=casual mention, 5=daily info, 9=very important like birthday/major events, 10=core identity)
+   - Emotion: only tag if conversation explicitly shows emotion, otherwise null. valence: positive(1.0)/negative(-1.0), arousal: high(1.0)/low(0.0)
+
+3. **Episodes**: Events, experiences, temporal information
+   - Format: {{"content": "event description", "timestamp": "time info or null", "people": ["person1", "person2"], "location": "place or null", "confidence": 0.0-1.0, "importance": 1-10, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
+   - people: List of people involved in the event (excluding the user)
+   - location: Where the event occurred
+   - Importance and emotion: same as Facts
+
+4. **Guidelines**:
+   - Importance: rate based on significance to user's life
+   - Emotion: only tag emotions explicitly expressed in conversation, do not infer
+{triples_section}
+
+Requirements:
+- Only extract explicitly mentioned information, do not infer
+- Confidence represents extraction certainty (0.0-1.0)
+- Return empty list if no information for a category
+- Must return valid JSON format only, no additional text
+
+Return format (JSON only, no other content):
 ```json
 {{
   "preferences": [...],
@@ -290,6 +430,8 @@ class MemoryExtractionService:
         for episode in episodes:
             content = episode.get("content")
             timestamp = episode.get("timestamp")
+            people = episode.get("people")  # v0.2.0: Extract people
+            location = episode.get("location")  # v0.2.0: Extract location
             confidence = episode.get("confidence", 1.0)
             importance = episode.get("importance")
             emotion = episode.get("emotion")
@@ -302,6 +444,11 @@ class MemoryExtractionService:
                     "confidence": confidence,
                     "extracted_from": "conversation",
                 }
+                # v0.2.0: Store people and location in metadata
+                if people and isinstance(people, list):
+                    meta["people"] = people
+                if location:
+                    meta["location"] = location
                 if importance is not None:
                     meta["importance"] = importance
                 if emotion and isinstance(emotion, dict):
