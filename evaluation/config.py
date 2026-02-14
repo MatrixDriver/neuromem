@@ -14,7 +14,7 @@ class EvalConfig:
     database_url: str = field(
         default_factory=lambda: os.environ.get(
             "DATABASE_URL",
-            "postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
+            "postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory_eval",
         )
     )
 
