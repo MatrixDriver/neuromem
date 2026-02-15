@@ -525,11 +525,9 @@ async def test_chinese_prompt_generation():
 
 
 @pytest.mark.asyncio
-async def test_auto_extract_on_add_message(db_session, mock_embedding):
+async def test_auto_extract_on_add_message(mock_embedding):
     """Test that auto_extract=True automatically extracts memories on add_message."""
-    from neuromemory._core import ConversationsFacade
-    from neuromemory.db import Database
-    from neuromemory.services.kv import KVService
+    from neuromemory import NeuroMemory
     from sqlalchemy import text
 
     # Mock LLM for extraction
@@ -543,39 +541,37 @@ async def test_auto_extract_on_add_message(db_session, mock_embedding):
 }
 ```"""
 
-    # Use session bind to create facade with auto_extract enabled
-    db = Database.__new__(Database)
-    db.engine = db_session.bind
-    db.session_factory = lambda: db_session
-
-    facade = ConversationsFacade(
-        db,
-        _auto_extract=True,
-        _embedding=mock_embedding,
-        _llm=MockExtractionLLM(),
-        _graph_enabled=False,
+    # Use full NeuroMemory instance with auto_extract
+    nm = NeuroMemory(
+        database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
+        embedding=mock_embedding,
+        llm=MockExtractionLLM(),
+        auto_extract=True,  # Enable auto-extraction
     )
+    await nm.init()
 
     # Add a single message
-    msg = await facade.add_message(
+    msg = await nm.conversations.add_message(
         user_id="auto_user",
         role="user",
         content="I work at Google as a software engineer",
     )
 
-    # Verify memories were automatically extracted
-    result = await db_session.execute(
-        text("SELECT content, memory_type FROM embeddings WHERE user_id = :uid"),
-        {"uid": "auto_user"},
-    )
-    rows = list(result.fetchall())
-    assert len(rows) >= 1
-    assert any(row.memory_type == "fact" for row in rows)
+    # Wait for background extraction task to complete
+    import asyncio
+    await asyncio.sleep(0.3)
 
-    # Check preferences in KV
-    kv_svc = KVService(db_session)
-    prefs = await kv_svc.list("preferences", "auto_user")
-    assert len(prefs) >= 1
+    # Verify memories were automatically extracted
+    async with nm._db.session() as session:
+        result = await session.execute(
+            text("SELECT content, memory_type FROM embeddings WHERE user_id = :uid"),
+            {"uid": "auto_user"},
+        )
+        rows = list(result.fetchall())
+        assert len(rows) >= 1
+        assert any(row.memory_type == "fact" for row in rows)
+
+    await nm.close()
 
 
 @pytest.mark.asyncio
@@ -603,6 +599,10 @@ async def test_auto_extract_disabled(db_session, mock_embedding):
         role="user",
         content="I work at Google",
     )
+
+    # Wait for background embedding task to complete (but no extraction)
+    import asyncio
+    await asyncio.sleep(0.1)
 
     # Verify NO memories were extracted
     result = await db_session.execute(

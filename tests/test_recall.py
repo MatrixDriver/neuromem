@@ -813,6 +813,10 @@ class TestRecallFullPipeline:
             user_id=user_id, role="assistant", content="了解了！",
         )
 
+        # Wait for background auto-extraction to complete
+        import asyncio
+        await asyncio.sleep(0.3)
+
         # Memories should already be extracted and recallable
         recall_result = await nm_with_llm.recall(user_id=user_id, query="Google")
         assert len(recall_result["merged"]) > 0

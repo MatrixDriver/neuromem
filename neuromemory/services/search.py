@@ -51,9 +51,17 @@ class SearchService:
         memory_type: str | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
+        query_embedding: list[float] | None = None,
     ) -> list[dict]:
-        """Semantic search for memories using cosine similarity."""
-        query_vector = await self._embedding.embed(query)
+        """Semantic search for memories using cosine similarity.
+
+        Args:
+            query_embedding: Optional pre-computed embedding to avoid recomputation
+        """
+        if query_embedding is not None:
+            query_vector = query_embedding
+        else:
+            query_vector = await self._embedding.embed(query)
 
         if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in query_vector):
             raise ValueError("Invalid vector data: must contain only numeric values")
@@ -114,6 +122,7 @@ class SearchService:
         limit: int = 5,
         memory_type: str | None = None,
         decay_rate: float = DEFAULT_DECAY_RATE,
+        query_embedding: list[float] | None = None,
     ) -> list[dict]:
         """Three-factor scored search: relevance x recency x importance.
 
@@ -121,8 +130,14 @@ class SearchService:
         - relevance: cosine similarity (0-1)
         - recency: exponential decay e^(-t/decay_rate), emotional arousal slows decay
         - importance: from metadata (1-10 scaled to 0.1-1.0), default 0.5
+
+        Args:
+            query_embedding: Optional pre-computed embedding to avoid recomputation
         """
-        query_vector = await self._embedding.embed(query)
+        if query_embedding is not None:
+            query_vector = query_embedding
+        else:
+            query_vector = await self._embedding.embed(query)
 
         if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in query_vector):
             raise ValueError("Invalid vector data: must contain only numeric values")

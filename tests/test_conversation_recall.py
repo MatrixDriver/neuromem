@@ -32,6 +32,10 @@ async def test_conversation_embedding_generated_on_add_message(mock_embedding):
         content="我 2024 年 1 月 15 日入职 Google，工号是 12345",
     )
 
+    # Wait for background embedding task to complete
+    import asyncio
+    await asyncio.sleep(0.1)  # Give background task time to finish
+
     # Verify embedding was generated
     from sqlalchemy import select, text
     from neuromemory.models.conversation import Conversation
@@ -67,6 +71,10 @@ async def test_recall_includes_conversation_results(mock_embedding):
         role="user",
         content="2024 年 3 月 10 日我参加了 Google I/O 大会，见到了 Sundar Pichai",
     )
+
+    # Wait for background embedding task
+    import asyncio
+    await asyncio.sleep(0.1)
 
     # Recall should search conversations
     result = await nm.recall(user_id=user_id, query="Google 大会", limit=10)
@@ -125,6 +133,10 @@ async def test_conversation_preserves_temporal_details(mock_embedding):
         content="2024 年 3 月 10 日下午 2 点我参加了 Google I/O 大会",
     )
 
+    # Wait for background tasks (embedding + auto-extract)
+    import asyncio
+    await asyncio.sleep(0.2)
+
     # Recall
     result = await nm.recall(user_id=user_id, query="技术大会", limit=10)
 
@@ -170,6 +182,10 @@ async def test_merged_results_deduplicate_conversations_and_memories(mock_embedd
         memory_type="fact",
     )
 
+    # Wait for background embedding tasks
+    import asyncio
+    await asyncio.sleep(0.1)
+
     # Recall
     result = await nm.recall(user_id=user_id, query="工作", limit=10)
 
@@ -212,6 +228,10 @@ async def test_conversation_recall_with_role_and_session(mock_embedding):
         content="Python 异步编程使用 async/await 语法",
         session_id=session_id,
     )
+
+    # Wait for background embedding tasks
+    import asyncio
+    await asyncio.sleep(0.1)
 
     # Recall
     result = await nm.recall(user_id=user_id, query="Python 异步", limit=10)

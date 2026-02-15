@@ -117,16 +117,18 @@ class ConversationsFacade:
             msg = await svc.add_message(user_id, role, content, session_id, metadata)
 
         # P1: Generate conversation embedding for recall (v0.2.0)
+        # 🚀 改为异步后台任务，不阻塞响应
         if self._embedding:
-            await self._generate_conversation_embedding(msg)
+            asyncio.create_task(self._generate_conversation_embedding_async(msg))
 
         # Strategy-based extraction (old logic)
         if self._on_message_added:
             await self._on_message_added(user_id, msg.session_id, 1)
 
         # Auto-extract (new logic, like mem0)
+        # 🚀 改为异步后台任务，不阻塞响应
         if self._auto_extract and self._llm and self._embedding:
-            await self._extract_single_message(user_id, msg.session_id, [msg])
+            asyncio.create_task(self._extract_single_message_async(user_id, msg.session_id, [msg]))
 
         return msg
 
@@ -170,6 +172,21 @@ class ConversationsFacade:
         except Exception as e:
             logger.warning(f"Failed to generate conversation embedding: {e}")
 
+    async def _generate_conversation_embedding_async(self, msg):
+        """异步后台生成 conversation embedding，不阻塞主流程。
+
+        所有异常都会被捕获并记录，不会影响对话响应。
+        """
+        try:
+            await self._generate_conversation_embedding(msg)
+        except Exception as e:
+            # 在测试环境中，session 可能已经关闭，这是正常的
+            from sqlalchemy.exc import IllegalStateChangeError
+            if isinstance(e, IllegalStateChangeError) or "connection is closed" in str(e):
+                logger.debug(f"后台 embedding 生成被中断（session 已关闭）: message_id={msg.id}")
+            else:
+                logger.error(f"后台 embedding 生成失败: message_id={msg.id}, error={e}", exc_info=True)
+
     async def _extract_single_message(self, user_id: str, session_id: str, messages: list):
         """Extract memories from a single message (auto-extract mode)."""
         from neuromemory.services.memory_extraction import MemoryExtractionService
@@ -184,6 +201,26 @@ class ConversationsFacade:
             await extraction_svc.extract_from_messages(user_id, messages)
 
         logger.debug(f"Auto-extracted memories for {user_id} from single message")
+
+    async def _extract_single_message_async(self, user_id: str, session_id: str, messages: list):
+        """异步后台提取单条消息的记忆，不阻塞主流程。
+
+        所有异常都会被捕获并记录，不会影响对话响应。
+        """
+        try:
+            await self._extract_single_message(user_id, session_id, messages)
+        except Exception as e:
+            # 在测试环境中，session 可能已经关闭，这是正常的
+            from sqlalchemy.exc import IllegalStateChangeError
+            if isinstance(e, IllegalStateChangeError) or "connection is closed" in str(e):
+                logger.debug(
+                    f"后台记忆提取被中断（session 已关闭）: user_id={user_id}, session_id={session_id}"
+                )
+            else:
+                logger.error(
+                    f"后台记忆提取失败: user_id={user_id}, session_id={session_id}, error={e}",
+                    exc_info=True
+                )
 
     async def _extract_batch(self, user_id: str, session_id: str, messages: list):
         """Extract memories from a batch of messages (auto-extract mode)."""
@@ -400,6 +437,10 @@ class NeuroMemory:
         self._active_sessions: set[tuple[str, str]] = set()
         self._extraction_counts: dict[str, int] = {}  # user_id -> count
 
+        # Embedding cache for query deduplication (reduces API calls)
+        self._embedding_cache: dict[str, list[float]] = {}
+        self._embedding_cache_max_size = 100  # LRU-style limit
+
         # Set up callbacks if extraction is configured and LLM is available
         _has_extraction = bool(extraction and llm)
         on_msg = self._on_message_added if _has_extraction else None
@@ -449,6 +490,43 @@ class NeuroMemory:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self.close()
+
+    # -- Embedding cache methods --
+
+    async def _cached_embed(self, text: str) -> list[float]:
+        """Cache-aware embedding computation.
+
+        Uses an in-memory LRU-style cache to avoid redundant API calls
+        for the same query text within a session.
+
+        Args:
+            text: Text to embed
+
+        Returns:
+            Embedding vector (list of floats)
+        """
+        if text in self._embedding_cache:
+            logger.debug(f"Embedding cache hit for text length {len(text)}")
+            return self._embedding_cache[text]
+
+        # Compute embedding
+        embedding = await self._embedding.embed(text)
+
+        # Add to cache with LRU eviction
+        if len(self._embedding_cache) >= self._embedding_cache_max_size:
+            # Simple FIFO eviction (can upgrade to true LRU if needed)
+            first_key = next(iter(self._embedding_cache))
+            del self._embedding_cache[first_key]
+            logger.debug(f"Evicted oldest embedding from cache")
+
+        self._embedding_cache[text] = embedding
+        logger.debug(f"Cached embedding for text length {len(text)}")
+        return embedding
+
+    def clear_embedding_cache(self) -> None:
+        """Clear the embedding cache. Useful for testing or memory management."""
+        self._embedding_cache.clear()
+        logger.info("Embedding cache cleared")
 
     # -- Auto-extraction internals --
 
@@ -584,11 +662,21 @@ class NeuroMemory:
         created_after=None,
         created_before=None,
     ) -> list[dict]:
-        """Semantic search for memories."""
+        """Semantic search for memories.
+
+        **Performance**: Uses cached embedding to avoid redundant API calls.
+        """
         from neuromemory.services.search import SearchService
+
+        # 🚀 Use cached embedding
+        query_embedding = await self._cached_embed(query)
+
         async with self._db.session() as session:
             svc = SearchService(session, self._embedding)
-            return await svc.search(user_id, query, limit, memory_type, created_after, created_before)
+            return await svc.search(
+                user_id, query, limit, memory_type, created_after, created_before,
+                query_embedding=query_embedding
+            )
 
     async def get_memories_by_time_range(self, user_id: str, start_time, end_time=None, memory_type=None, limit=100, offset=0):
         from neuromemory.services.memory import MemoryService
@@ -635,6 +723,8 @@ class NeuroMemory:
         2. Original conversation fragments (preserves dates, details)
         3. Graph entity traversal
 
+        **Performance**: Uses cached embedding to avoid redundant API calls.
+
         Returns:
             {
                 "vector_results": [...],       # extracted memories
@@ -645,6 +735,9 @@ class NeuroMemory:
         """
         from neuromemory.services.search import SearchService, DEFAULT_DECAY_RATE
 
+        # 🚀 Compute query embedding once, reuse for all searches
+        query_embedding = await self._cached_embed(query)
+
         # 1. Search extracted memories (existing)
         vector_results = []
         async with self._db.session() as session:
@@ -652,11 +745,13 @@ class NeuroMemory:
             vector_results = await svc.scored_search(
                 user_id, query, limit,
                 decay_rate=decay_rate or DEFAULT_DECAY_RATE,
+                query_embedding=query_embedding,  # 传递预计算的 embedding
             )
 
         # 2. Search original conversations (P1: mem0-style)
         conversation_results = await self._search_conversations(
             user_id, query, limit,
+            query_embedding=query_embedding,  # 传递预计算的 embedding
         )
 
         # 3. Search graph entities
@@ -707,16 +802,23 @@ class NeuroMemory:
         user_id: str,
         query: str,
         limit: int = 10,
+        query_embedding: list[float] | None = None,
     ) -> list[dict]:
         """Search original conversation fragments (P1 feature).
 
         This preserves temporal details, dates, and specific information that
         may be lost during LLM extraction.
+
+        Args:
+            query_embedding: Optional pre-computed embedding to avoid recomputation
         """
         from sqlalchemy import text
 
         try:
-            query_embedding = await self._embedding.embed(query)
+            if query_embedding is None:
+                query_embedding = await self._cached_embed(query)
+            else:
+                logger.debug("Using provided query_embedding, skipping embed call")
         except Exception as e:
             logger.warning(f"Failed to generate query embedding for conversations: {e}")
             return []
