@@ -62,14 +62,58 @@ class MemoryExtractionService:
         ]
 
         classified = await self._classify_messages(message_dicts, user_id)
+        logger.info(f"分类完成: {len(classified.get('preferences', []))} prefs, "
+                   f"{len(classified.get('facts', []))} facts, "
+                   f"{len(classified.get('episodes', []))} episodes, "
+                   f"{len(classified.get('triples', []))} triples")
 
-        prefs_count = await self._store_preferences(user_id, classified["preferences"])
-        facts_count = await self._store_facts(user_id, classified["facts"])
-        episodes_count = await self._store_episodes(user_id, classified["episodes"])
+        try:
+            prefs_count = await self._store_preferences(user_id, classified["preferences"])
+            logger.info(f"✅ 存储 preferences 成功: {prefs_count}")
+        except Exception as e:
+            logger.error(f"❌ 存储 preferences 失败: {e}", exc_info=True)
+            prefs_count = 0
+
+        try:
+            facts_count = await self._store_facts(user_id, classified["facts"])
+            logger.info(f"✅ 存储 facts 成功: {facts_count}")
+        except Exception as e:
+            logger.error(f"❌ 存储 facts 失败: {e}", exc_info=True)
+            facts_count = 0
+
+        try:
+            episodes_count = await self._store_episodes(user_id, classified["episodes"])
+            logger.info(f"✅ 存储 episodes 成功: {episodes_count}")
+        except Exception as e:
+            logger.error(f"❌ 存储 episodes 失败: {e}", exc_info=True)
+            episodes_count = 0
 
         triples_count = 0
         if self._graph_enabled:
-            triples_count = await self._store_triples(user_id, classified["triples"])
+            try:
+                logger.info(f"开始存储 triples: {len(classified.get('triples', []))} 个")
+                triples_count = await self._store_triples(user_id, classified["triples"])
+                logger.info(f"✅ 存储 triples 成功: {triples_count}")
+            except Exception as e:
+                logger.error(f"❌ 存储 triples 失败: {e}", exc_info=True)
+                triples_count = 0
+
+        # 统一提交所有记忆（preferences, facts, episodes, triples）
+        # 保证原子性：要么全部成功，要么全部失败
+        total_count = prefs_count + facts_count + episodes_count + triples_count
+        if total_count > 0:
+            try:
+                await self.db.commit()
+                logger.info(f"✅ 所有记忆已提交 (prefs={prefs_count}, facts={facts_count}, "
+                           f"episodes={episodes_count}, triples={triples_count})")
+            except Exception as e:
+                logger.error(f"❌ 提交记忆失败，回滚所有更改: {e}", exc_info=True)
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+                # 提交失败，所有计数归零
+                prefs_count = facts_count = episodes_count = triples_count = 0
 
         return {
             "preferences_extracted": prefs_count,
@@ -372,7 +416,13 @@ Return format (JSON only, no other content):
                 )
                 count += 1
             except Exception as e:
-                logger.error("Failed to store preference %s: %s", key, e)
+                logger.error("Failed to store preference %s: %s", key, e, exc_info=True)
+                # 事务失败时回滚
+                try:
+                    await self.db.rollback()
+                    logger.warning("已回滚事务（preference 存储失败）")
+                except Exception:
+                    pass
         return count
 
     async def _store_facts(
@@ -414,11 +464,15 @@ Return format (JSON only, no other content):
                 self.db.add(embedding_obj)
                 count += 1
             except Exception as e:
-                logger.error("Failed to store fact: %s", e)
+                logger.error("Failed to store fact: %s", e, exc_info=True)
+                # 事务失败时回滚
+                try:
+                    await self.db.rollback()
+                    logger.warning("已回滚事务（fact 存储失败）")
+                except Exception:
+                    pass
 
-        if count > 0:
-            await self.db.commit()
-
+        # 不在这里 commit，等待所有类型的记忆都存储完后统一 commit（保证原子性）
         return count
 
     async def _store_episodes(
@@ -457,6 +511,7 @@ Return format (JSON only, no other content):
                         "arousal": emotion.get("arousal", 0),
                         "label": emotion.get("label", ""),
                     }
+                logger.debug(f"准备存储 episode: {content[:50]}...")
                 embedding_obj = Embedding(
                     user_id=user_id,
                     content=content,
@@ -464,14 +519,20 @@ Return format (JSON only, no other content):
                     memory_type="episodic",
                     metadata_=meta,
                 )
+                logger.debug(f"调用 db.add()...")
                 self.db.add(embedding_obj)
+                logger.debug(f"db.add() 成功")
                 count += 1
             except Exception as e:
-                logger.error("Failed to store episode: %s", e)
+                logger.error("Failed to store episode: %s", e, exc_info=True)
+                # 事务失败时回滚
+                try:
+                    await self.db.rollback()
+                    logger.warning("已回滚事务（episode 存储失败）")
+                except Exception:
+                    pass
 
-        if count > 0:
-            await self.db.commit()
-
+        # 不在这里 commit，等待所有类型的记忆都存储完后统一 commit（保证原子性）
         return count
 
     async def _store_triples(

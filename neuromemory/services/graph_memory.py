@@ -203,7 +203,13 @@ class GraphMemoryService:
             properties=properties,
         )
         self.db.add(node)
-        await self.db.flush()
+        logger.debug(f"准备 flush 创建节点: {node_type.value}:{node_id}")
+        try:
+            await self.db.flush()
+            logger.debug(f"✅ flush 成功")
+        except Exception as e:
+            logger.error(f"❌ flush 失败（可能触发了待处理的其他 SQL）: {e}", exc_info=True)
+            raise
 
         # Best-effort AGE sync
         try:
