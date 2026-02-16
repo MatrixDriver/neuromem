@@ -1,4 +1,4 @@
-"""Semantic search service - vector similarity search via pgvector."""
+"""Semantic search service - vector similarity + BM25 hybrid search."""
 
 from __future__ import annotations
 
@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 # Default decay rate: 30 days in seconds
 DEFAULT_DECAY_RATE = 86400 * 30
+
+# RRF constant (standard value from the original paper)
+RRF_K = 60
 
 
 class SearchService:
@@ -52,11 +55,15 @@ class SearchService:
         created_after: datetime | None = None,
         created_before: datetime | None = None,
         query_embedding: list[float] | None = None,
+        event_after: str | None = None,
+        event_before: str | None = None,
     ) -> list[dict]:
-        """Semantic search for memories using cosine similarity.
+        """Hybrid search: vector similarity + BM25 keyword search, merged via RRF.
 
         Args:
             query_embedding: Optional pre-computed embedding to avoid recomputation
+            event_after: Filter episodes by metadata timestamp >= this ISO date
+            event_before: Filter episodes by metadata timestamp <= this ISO date
         """
         if query_embedding is not None:
             query_vector = query_embedding
@@ -69,7 +76,7 @@ class SearchService:
         vector_str = f"[{','.join(str(float(v)) for v in query_vector)}]"
 
         filters = "user_id = :user_id"
-        params: dict = {"user_id": user_id, "limit": limit}
+        params: dict = {"user_id": user_id, "limit": limit, "query_text": query}
 
         if memory_type:
             filters += " AND memory_type = :memory_type"
@@ -83,13 +90,49 @@ class SearchService:
             filters += " AND created_at < :created_before"
             params["created_before"] = created_before
 
+        if event_after:
+            filters += " AND metadata->>'timestamp' >= :event_after"
+            params["event_after"] = event_after
+
+        if event_before:
+            filters += " AND metadata->>'timestamp' <= :event_before"
+            params["event_before"] = event_before
+
+        # Hybrid search: RRF fusion of vector and BM25 results
+        # Fetch more candidates from each source for better fusion
+        candidate_limit = limit * 4
+
         sql = text(
             f"""
-            SELECT id, content, memory_type, metadata, created_at,
-                   1 - (embedding <=> '{vector_str}'::vector) AS score
-            FROM embeddings
-            WHERE {filters}
-            ORDER BY embedding <=> '{vector_str}'::vector
+            WITH vector_ranked AS (
+                SELECT id, content, memory_type, metadata, created_at,
+                       1 - (embedding <=> '{vector_str}'::vector) AS vector_score,
+                       ROW_NUMBER() OVER (ORDER BY embedding <=> '{vector_str}'::vector) AS vector_rank
+                FROM embeddings
+                WHERE {filters}
+                ORDER BY embedding <=> '{vector_str}'::vector
+                LIMIT {candidate_limit}
+            ),
+            bm25_ranked AS (
+                SELECT id,
+                       ts_rank_cd(to_tsvector('simple', content), plainto_tsquery('simple', :query_text)) AS bm25_score,
+                       ROW_NUMBER() OVER (
+                           ORDER BY ts_rank_cd(to_tsvector('simple', content), plainto_tsquery('simple', :query_text)) DESC
+                       ) AS bm25_rank
+                FROM embeddings
+                WHERE {filters}
+                  AND to_tsvector('simple', content) @@ plainto_tsquery('simple', :query_text)
+                ORDER BY bm25_score DESC
+                LIMIT {candidate_limit}
+            )
+            SELECT v.id, v.content, v.memory_type, v.metadata, v.created_at,
+                   v.vector_score,
+                   COALESCE(b.bm25_score, 0) AS bm25_score,
+                   (1.0 / ({RRF_K} + v.vector_rank))
+                   + COALESCE(1.0 / ({RRF_K} + b.bm25_rank), 0) AS rrf_score
+            FROM vector_ranked v
+            LEFT JOIN bm25_ranked b ON v.id = b.id
+            ORDER BY rrf_score DESC
             LIMIT :limit
         """
         )
@@ -104,7 +147,9 @@ class SearchService:
                 "memory_type": row.memory_type,
                 "metadata": row.metadata,
                 "created_at": row.created_at,
-                "score": round(float(row.score), 4),
+                "score": round(float(row.rrf_score), 4),
+                "vector_score": round(float(row.vector_score), 4),
+                "bm25_score": round(float(row.bm25_score), 4),
             }
             for row in rows
         ]
@@ -123,16 +168,20 @@ class SearchService:
         memory_type: str | None = None,
         decay_rate: float = DEFAULT_DECAY_RATE,
         query_embedding: list[float] | None = None,
+        event_after: str | None = None,
+        event_before: str | None = None,
     ) -> list[dict]:
-        """Three-factor scored search: relevance x recency x importance.
+        """Three-factor scored search with BM25 hybrid: relevance x recency x importance.
 
-        Score = relevance * recency * importance
-        - relevance: cosine similarity (0-1)
+        Score = rrf_relevance * recency * importance
+        - rrf_relevance: RRF fusion of vector similarity and BM25 keyword match
         - recency: exponential decay e^(-t/decay_rate), emotional arousal slows decay
         - importance: from metadata (1-10 scaled to 0.1-1.0), default 0.5
 
         Args:
             query_embedding: Optional pre-computed embedding to avoid recomputation
+            event_after: Filter episodes by metadata timestamp >= this ISO date
+            event_before: Filter episodes by metadata timestamp <= this ISO date
         """
         if query_embedding is not None:
             query_vector = query_embedding
@@ -145,31 +194,72 @@ class SearchService:
         vector_str = f"[{','.join(str(float(v)) for v in query_vector)}]"
 
         filters = "user_id = :user_id"
-        params: dict = {"user_id": user_id, "limit": limit, "decay_rate": decay_rate}
+        params: dict = {"user_id": user_id, "limit": limit, "decay_rate": decay_rate, "query_text": query}
 
         if memory_type:
             filters += " AND memory_type = :memory_type"
             params["memory_type"] = memory_type
 
-        # Emotional arousal slows decay: effective_decay = decay_rate * (1 + arousal * 0.5)
+        if event_after:
+            filters += " AND metadata->>'timestamp' >= :event_after"
+            params["event_after"] = event_after
+
+        if event_before:
+            filters += " AND metadata->>'timestamp' <= :event_before"
+            params["event_before"] = event_before
+
+        candidate_limit = limit * 4
+
         sql = text(
             f"""
+            WITH vector_ranked AS (
+                SELECT id, content, memory_type, metadata, created_at,
+                       access_count, last_accessed_at,
+                       1 - (embedding <=> '{vector_str}'::vector) AS vector_score,
+                       ROW_NUMBER() OVER (ORDER BY embedding <=> '{vector_str}'::vector) AS vector_rank
+                FROM embeddings
+                WHERE {filters}
+                ORDER BY embedding <=> '{vector_str}'::vector
+                LIMIT {candidate_limit}
+            ),
+            bm25_ranked AS (
+                SELECT id,
+                       ts_rank_cd(to_tsvector('simple', content), plainto_tsquery('simple', :query_text)) AS bm25_score,
+                       ROW_NUMBER() OVER (
+                           ORDER BY ts_rank_cd(to_tsvector('simple', content), plainto_tsquery('simple', :query_text)) DESC
+                       ) AS bm25_rank
+                FROM embeddings
+                WHERE {filters}
+                  AND to_tsvector('simple', content) @@ plainto_tsquery('simple', :query_text)
+                ORDER BY bm25_score DESC
+                LIMIT {candidate_limit}
+            ),
+            hybrid AS (
+                SELECT v.*,
+                       COALESCE(b.bm25_score, 0) AS bm25_score,
+                       -- RRF fusion as relevance signal
+                       (1.0 / ({RRF_K} + v.vector_rank))
+                       + COALESCE(1.0 / ({RRF_K} + b.bm25_rank), 0) AS rrf_score
+                FROM vector_ranked v
+                LEFT JOIN bm25_ranked b ON v.id = b.id
+            )
             SELECT id, content, memory_type, metadata, created_at,
                    access_count, last_accessed_at,
-                   (1 - (embedding <=> '{vector_str}'::vector)) AS relevance,
+                   vector_score AS relevance,
+                   bm25_score,
+                   rrf_score,
                    EXP(
                        -EXTRACT(EPOCH FROM (NOW() - created_at))
                        / (:decay_rate * (1 + COALESCE((metadata->'emotion'->>'arousal')::float, 0) * 0.5))
                    ) AS recency,
                    COALESCE((metadata->>'importance')::float / 10.0, 0.5) AS importance,
-                   (1 - (embedding <=> '{vector_str}'::vector))
+                   rrf_score
                    * EXP(
                        -EXTRACT(EPOCH FROM (NOW() - created_at))
                        / (:decay_rate * (1 + COALESCE((metadata->'emotion'->>'arousal')::float, 0) * 0.5))
                    )
                    * COALESCE((metadata->>'importance')::float / 10.0, 0.5) AS score
-            FROM embeddings
-            WHERE {filters}
+            FROM hybrid
             ORDER BY score DESC
             LIMIT :limit
         """
@@ -186,6 +276,8 @@ class SearchService:
                 "metadata": row.metadata,
                 "created_at": row.created_at,
                 "relevance": round(float(row.relevance), 4),
+                "bm25_score": round(float(row.bm25_score), 4),
+                "rrf_score": round(float(row.rrf_score), 4),
                 "recency": round(float(row.recency), 4),
                 "importance": round(float(row.importance), 4),
                 "score": round(float(row.score), 4),

@@ -311,7 +311,7 @@ class TestRecallCombinedScoring:
 
     @pytest.mark.asyncio
     async def test_score_equals_product(self, db_session, mock_embedding):
-        """score should equal relevance × recency × importance."""
+        """score should equal rrf_score × recency × importance."""
         svc = SearchService(db_session, mock_embedding)
         await svc.add_memory(
             user_id="combo_u1", content="product test",
@@ -321,7 +321,7 @@ class TestRecallCombinedScoring:
 
         results = await svc.scored_search(user_id="combo_u1", query="product test")
         r = results[0]
-        expected = round(r["relevance"] * r["recency"] * r["importance"], 4)
+        expected = round(r["rrf_score"] * r["recency"] * r["importance"], 4)
         assert r["score"] == expected
 
     @pytest.mark.asyncio
@@ -521,8 +521,9 @@ class TestRecallScenarios:
             assert "recency" in r
             assert "importance" in r
             assert "score" in r
-            # score = relevance * recency * importance
-            expected = round(r["relevance"] * r["recency"] * r["importance"], 4)
+            assert "rrf_score" in r
+            # score = rrf_score * recency * importance
+            expected = round(r["rrf_score"] * r["recency"] * r["importance"], 4)
             assert r["score"] == expected
 
 

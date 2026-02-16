@@ -298,17 +298,17 @@ class FilesFacade:
             svc = FileService(session, self._embedding, self._storage)
             return await svc.search(user_id, query, limit, file_types, category, tags)
 
-    async def get(self, file_id):
+    async def get(self, user_id: str, file_id):
         from neuromemory.services.files import FileService
         async with self._db.session() as session:
             svc = FileService(session, self._embedding, self._storage)
-            return await svc.get_document(file_id)
+            return await svc.get_document(file_id, user_id)
 
-    async def delete(self, file_id) -> bool:
+    async def delete(self, user_id: str, file_id) -> bool:
         from neuromemory.services.files import FileService
         async with self._db.session() as session:
             svc = FileService(session, self._embedding, self._storage)
-            return await svc.delete_document(file_id)
+            return await svc.delete_document(file_id, user_id)
 
 
 class GraphFacade:
@@ -323,23 +323,23 @@ class GraphFacade:
             svc = GraphService(session)
             return await svc.create_node(node_type, node_id, properties, user_id)
 
-    async def get_node(self, node_type, node_id: str):
+    async def get_node(self, user_id: str, node_type, node_id: str):
         from neuromemory.services.graph import GraphService
         async with self._db.session() as session:
             svc = GraphService(session)
-            return await svc.get_node(node_type, node_id)
+            return await svc.get_node(node_type, node_id, user_id)
 
-    async def update_node(self, node_type, node_id: str, properties: dict):
+    async def update_node(self, user_id: str, node_type, node_id: str, properties: dict):
         from neuromemory.services.graph import GraphService
         async with self._db.session() as session:
             svc = GraphService(session)
-            return await svc.update_node(node_type, node_id, properties)
+            return await svc.update_node(node_type, node_id, properties, user_id)
 
-    async def delete_node(self, node_type, node_id: str):
+    async def delete_node(self, user_id: str, node_type, node_id: str):
         from neuromemory.services.graph import GraphService
         async with self._db.session() as session:
             svc = GraphService(session)
-            return await svc.delete_node(node_type, node_id)
+            return await svc.delete_node(node_type, node_id, user_id)
 
     async def create_edge(self, source_type, source_id: str, edge_type, target_type, target_id: str, properties: dict | None = None, user_id: str | None = None):
         from neuromemory.services.graph import GraphService
@@ -347,19 +347,20 @@ class GraphFacade:
             svc = GraphService(session)
             return await svc.create_edge(source_type, source_id, edge_type, target_type, target_id, properties, user_id)
 
-    async def get_neighbors(self, node_type, node_id: str, edge_types=None, direction: str = "both", limit: int = 10):
+    async def get_neighbors(self, user_id: str, node_type, node_id: str, edge_types=None, direction: str = "both", limit: int = 10):
         from neuromemory.services.graph import GraphService
         async with self._db.session() as session:
             svc = GraphService(session)
-            return await svc.get_neighbors(node_type, node_id, edge_types, direction, limit)
+            return await svc.get_neighbors(node_type, node_id, edge_types, direction, limit, user_id)
 
-    async def find_path(self, source_type, source_id: str, target_type, target_id: str, max_depth: int = 3):
+    async def find_path(self, user_id: str, source_type, source_id: str, target_type, target_id: str, max_depth: int = 3):
         from neuromemory.services.graph import GraphService
         async with self._db.session() as session:
             svc = GraphService(session)
-            return await svc.find_path(source_type, source_id, target_type, target_id, max_depth)
+            return await svc.find_path(source_type, source_id, target_type, target_id, max_depth, user_id)
 
     async def query(self, cypher: str, params: dict | None = None):
+        """Execute raw Cypher query. WARNING: bypasses user isolation."""
         from neuromemory.services.graph import GraphService
         async with self._db.session() as session:
             svc = GraphService(session)
@@ -714,7 +715,7 @@ class NeuroMemory:
         self,
         user_id: str,
         query: str,
-        limit: int = 10,
+        limit: int = 20,
         decay_rate: float | None = None,
     ) -> dict:
         """Hybrid recall: memories + conversations + graph, merged and deduplicated.

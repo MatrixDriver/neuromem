@@ -130,11 +130,12 @@ class MemoryExtractionService:
     ) -> dict[str, list[dict]]:
         """Classify messages using LLM."""
         conversation_text = self._format_conversation(messages)
+        session_timestamp = self._get_session_timestamp(messages)
 
         # Determine extraction language (KV preference > auto-detect > default)
         language = await self._get_extraction_language(user_id, conversation_text)
 
-        prompt = self._build_classification_prompt(conversation_text, language)
+        prompt = self._build_classification_prompt(conversation_text, language, session_timestamp)
 
         try:
             result_text = await self._llm.chat(
@@ -153,8 +154,20 @@ class MemoryExtractionService:
         for msg in messages:
             role = msg.get("role", "unknown").upper()
             content = msg.get("content", "")
-            lines.append(f"{role}: {content}")
+            ts = msg.get("created_at", "")
+            if ts:
+                lines.append(f"[{ts}] {role}: {content}")
+            else:
+                lines.append(f"{role}: {content}")
         return "\n".join(lines)
+
+    def _get_session_timestamp(self, messages: list[dict]) -> str | None:
+        """Get the latest timestamp from messages as session reference time."""
+        for msg in reversed(messages):
+            ts = msg.get("created_at")
+            if ts:
+                return ts
+        return None
 
     async def _get_extraction_language(
         self,
@@ -221,14 +234,14 @@ class MemoryExtractionService:
         en_ratio = english_chars / total
         return max(zh_ratio, en_ratio)
 
-    def _build_classification_prompt(self, conversation: str, language: str) -> str:
+    def _build_classification_prompt(self, conversation: str, language: str, session_timestamp: str | None = None) -> str:
         """Build classification prompt in the specified language."""
         if language == "zh":
-            return self._build_zh_prompt(conversation)
+            return self._build_zh_prompt(conversation, session_timestamp)
         else:
-            return self._build_en_prompt(conversation)
+            return self._build_en_prompt(conversation, session_timestamp)
 
-    def _build_zh_prompt(self, conversation: str) -> str:
+    def _build_zh_prompt(self, conversation: str, session_timestamp: str | None = None) -> str:
         """Build Chinese classification prompt (original)."""
         triples_section = ""
         triples_output = ""
@@ -243,34 +256,69 @@ class MemoryExtractionService:
    - 每个 Fact 和 Episode 尽量提取对应的 triple"""
             triples_output = ',\n  "triples": [...]'
 
+        temporal_section = ""
+        if session_timestamp:
+            temporal_section = f"""
+**时间上下文**：
+   - 当前对话会话时间: {session_timestamp}
+   - 将所有相对时间表达转换为绝对日期（基于会话时间计算）
+   - 示例："昨天" → 计算实际日期，"上周" → 计算日期范围，"三年前" → 计算年份
+   - 将计算后的绝对时间存入 "timestamp" 字段，使用 ISO 8601 格式（如 "2023-05-06"）
+   - 同时将原始时间表达保留在 "timestamp_original" 字段中
+"""
+
         return f"""分析以下对话，提取用户的记忆信息。请严格按照 JSON 格式返回结果。
 
 对话内容：
 ```
 {conversation}
 ```
-
+{temporal_section}
 请提取以下记忆：
 
 1. **Preferences（偏好）**: 用户的喜好、习惯、设置
    - 格式: {{"key": "偏好名称", "value": "偏好值", "confidence": 0.0-1.0}}
    - key 应该用英文，value 可以是中文
 
-2. **Facts（事实）**: 用户的客观信息
-   - 格式: {{"content": "事实描述", "category": "分类", "confidence": 0.0-1.0, "importance": 1-10, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
-   - category 可选: work, skill, hobby, personal, education, location
+2. **Facts（事实）**: 用户及对话中提到的人物的客观信息
+   - 格式: {{"content": "事实描述", "category": "分类", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
+   - category 可选: work, skill, hobby, personal, education, location, health, relationship, finance
    - importance: 对用户的重要程度（1=随口一提, 5=日常信息, 9=非常重要如生日/重大事件, 10=核心身份信息）
-   - emotion: 如果对话中有明显情感色彩则填写，否则设为 null。valence: 正面(1.0)/负面(-1.0)，arousal: 高兴奋(1.0)/低兴奋(0.0)
+   - emotion: 如果对话中有明显情感色彩则填写，否则设为 null
+   - entities: 提取该事实中提到的人名、地点和关键主题
+
+   **Facts 关键规则**:
+   - 每个 fact 必须是原子的：一条 fact 只包含一个独立信息
+   - 每个 fact 必须有明确的主语（禁止使用代词如"他/她/它"）
+   - 必须将代词还原为实际名称："她在那里工作" → "Caroline 在心理咨询中心工作"
+   - 错误示范: "Caroline 是跨性别者，在咨询中心工作"（两个事实合并了）
+   - 正确示范: "Caroline 是跨性别女性" + "Caroline 在心理咨询中心工作"（分开的原子事实）
+   - 错误示范: "她喜欢狗"（代词，不完整）
+   - 正确示范: "用户喜欢狗" 或 "Caroline 喜欢狗"（明确主语）
+   - 提取所有实体属性：姓名、年龄、职业、居住地、学历、人际关系、技能、兴趣、身份
+   - 同时提取概念性/推理性信息：
+     * 意图和计划："用户计划考取心理咨询师证书"
+     * 兴趣和爱好："用户对心理学感兴趣"
+     * 技能和能力："Caroline 精通西班牙语"
+     * 价值观和信念："用户重视家庭支持"
+     * 性格特征："用户性格内向"
+     * 因果关系："用户因为新工作搬到了纽约"
 
 3. **Episodes（情景）**: 事件、经历、时间相关信息
-   - 格式: {{"content": "事件描述", "timestamp": "时间信息或null", "people": ["人名1", "人名2"], "location": "地点或null", "confidence": 0.0-1.0, "importance": 1-10, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
+   - 格式: {{"content": "事件描述", "timestamp": "ISO日期或null", "timestamp_original": "原始时间表达或null", "people": ["人名1", "人名2"], "location": "地点或null", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
    - people: 事件中涉及的人物列表（不包括用户自己）
    - location: 事件发生的地点
-   - importance 和 emotion 同 Facts 定义
+   - timestamp: 尽可能计算为 ISO 8601 格式的绝对日期
+   - timestamp_original: 对话中的原始时间表达（如"昨天"、"去年夏天"）
+   - entities: 同 Facts
+   - content 必须使用明确的名称，禁止代词
 
 4. **注意事项**:
    - importance: 根据内容对用户生活的重要程度打分
    - emotion: 只标注对话文本中明显表达的情感，不推测用户内心感受
+   - 全文代词消解：将所有代词还原为实际名称
+   - 提取对话中所有提到的人物的信息，不仅仅是用户自己
+   - 同时提取具体事实和概念性/抽象信息（计划、兴趣、价值观、推理链）
 {triples_section}
 
 要求：
@@ -288,7 +336,7 @@ class MemoryExtractionService:
 }}
 ```"""
 
-    def _build_en_prompt(self, conversation: str) -> str:
+    def _build_en_prompt(self, conversation: str, session_timestamp: str | None = None) -> str:
         """Build English classification prompt for English conversations."""
         triples_section = ""
         triples_output = ""
@@ -303,34 +351,69 @@ class MemoryExtractionService:
    - Extract corresponding triple for each Fact and Episode when possible"""
             triples_output = ',\n  "triples": [...]'
 
+        temporal_section = ""
+        if session_timestamp:
+            temporal_section = f"""
+**Temporal Context**:
+   - Current conversation session time: {session_timestamp}
+   - Convert ALL relative time expressions to absolute dates based on session time
+   - Examples: "yesterday" → compute actual date, "last week" → compute date range, "3 years ago" → compute year
+   - Store computed absolute time in the "timestamp" field as ISO 8601 format (e.g. "2023-05-06")
+   - Also preserve the original expression in "timestamp_original" field
+"""
+
         return f"""Extract structured memory information from the following conversation. Return results strictly in JSON format.
 
 Conversation:
 ```
 {conversation}
 ```
-
+{temporal_section}
 Extract the following memories:
 
 1. **Preferences**: User's likes, dislikes, habits, settings
    - Format: {{"key": "preference_name", "value": "preference_value", "confidence": 0.0-1.0}}
    - Key should be in English, value can be in any language
 
-2. **Facts**: Objective information about the user
-   - Format: {{"content": "fact description", "category": "category", "confidence": 0.0-1.0, "importance": 1-10, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
-   - Category options: work, skill, hobby, personal, education, location
+2. **Facts**: Objective information about the user and people mentioned
+   - Format: {{"content": "fact description", "category": "category", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
+   - Category options: work, skill, hobby, personal, education, location, health, relationship, finance
    - Importance: significance to user's life (1=casual mention, 5=daily info, 9=very important like birthday/major events, 10=core identity)
-   - Emotion: only tag if conversation explicitly shows emotion, otherwise null. valence: positive(1.0)/negative(-1.0), arousal: high(1.0)/low(0.0)
+   - Emotion: only tag if conversation explicitly shows emotion, otherwise null
+   - entities: extract people names, locations, and key topics mentioned in this fact
+
+   **CRITICAL rules for Facts**:
+   - Each fact MUST be atomic: one single piece of information per fact
+   - Each fact MUST be self-contained with explicit subject (never use pronouns like "she/he/they")
+   - Always resolve pronouns to actual names: "She works there" → "Caroline works at the counseling center"
+   - BAD: "Caroline is transgender and works at a counseling center" (two facts merged)
+   - GOOD: "Caroline is a transgender woman" + "Caroline works at a counseling center" (separate atomic facts)
+   - BAD: "She likes dogs" (pronoun, incomplete)
+   - GOOD: "The user likes dogs" or "Caroline likes dogs" (explicit subject)
+   - Extract ALL entity attributes: name, age, occupation, location, education, relationships, skills, interests, identity
+   - Also extract conceptual/inferential information:
+     * Intentions and plans: "The user plans to get a counseling certification"
+     * Interests and passions: "The user is interested in psychology"
+     * Skills and abilities: "Caroline is fluent in Spanish"
+     * Values and beliefs: "The user values family support"
+     * Personality traits: "The user is introverted"
+     * Causal relationships: "The user moved to NYC because of a new job"
 
 3. **Episodes**: Events, experiences, temporal information
-   - Format: {{"content": "event description", "timestamp": "time info or null", "people": ["person1", "person2"], "location": "place or null", "confidence": 0.0-1.0, "importance": 1-10, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
+   - Format: {{"content": "event description", "timestamp": "ISO date or null", "timestamp_original": "original time expression or null", "people": ["person1", "person2"], "location": "place or null", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
    - people: List of people involved in the event (excluding the user)
    - location: Where the event occurred
-   - Importance and emotion: same as Facts
+   - timestamp: Computed absolute date in ISO 8601 format when possible
+   - timestamp_original: The original time expression from the conversation (e.g. "yesterday", "last summer")
+   - entities: same as Facts
+   - content MUST use explicit names, never pronouns
 
 4. **Guidelines**:
    - Importance: rate based on significance to user's life
    - Emotion: only tag emotions explicitly expressed in conversation, do not infer
+   - Resolve ALL pronoun references to actual names throughout
+   - Extract facts about ALL people mentioned, not just the user
+   - Extract both concrete facts AND conceptual/abstract information (plans, interests, values, reasoning)
 {triples_section}
 
 Requirements:
@@ -450,6 +533,9 @@ Return format (JSON only, no other content):
                         "arousal": emotion.get("arousal", 0),
                         "label": emotion.get("label", ""),
                     }
+                entities = fact.get("entities")
+                if entities and isinstance(entities, dict):
+                    meta["entities"] = entities
                 embedding_obj = Embedding(
                     user_id=user_id,
                     content=content,
@@ -461,8 +547,6 @@ Return format (JSON only, no other content):
                 count += 1
             except Exception as e:
                 logger.error("Failed to store fact: %s", e, exc_info=True)
-                # 不在这里 rollback，让异常向上传播或继续处理下一个
-                # 最终的 commit/rollback 由 extract_from_messages 统一处理
 
         # 不在这里 commit，等待所有类型的记忆都存储完后统一 commit（保证原子性）
         return count
@@ -476,8 +560,9 @@ Return format (JSON only, no other content):
         for episode in episodes:
             content = episode.get("content")
             timestamp = episode.get("timestamp")
-            people = episode.get("people")  # v0.2.0: Extract people
-            location = episode.get("location")  # v0.2.0: Extract location
+            timestamp_original = episode.get("timestamp_original")
+            people = episode.get("people")
+            location = episode.get("location")
             confidence = episode.get("confidence", 1.0)
             importance = episode.get("importance")
             emotion = episode.get("emotion")
@@ -490,7 +575,8 @@ Return format (JSON only, no other content):
                     "confidence": confidence,
                     "extracted_from": "conversation",
                 }
-                # v0.2.0: Store people and location in metadata
+                if timestamp_original:
+                    meta["timestamp_original"] = timestamp_original
                 if people and isinstance(people, list):
                     meta["people"] = people
                 if location:
@@ -503,7 +589,9 @@ Return format (JSON only, no other content):
                         "arousal": emotion.get("arousal", 0),
                         "label": emotion.get("label", ""),
                     }
-                logger.debug(f"准备存储 episode: {content[:50]}...")
+                entities = episode.get("entities")
+                if entities and isinstance(entities, dict):
+                    meta["entities"] = entities
                 embedding_obj = Embedding(
                     user_id=user_id,
                     content=content,
@@ -511,14 +599,10 @@ Return format (JSON only, no other content):
                     memory_type="episodic",
                     metadata_=meta,
                 )
-                logger.debug(f"调用 db.add()...")
                 self.db.add(embedding_obj)
-                logger.debug(f"db.add() 成功")
                 count += 1
             except Exception as e:
                 logger.error("Failed to store episode: %s", e, exc_info=True)
-                # 不在这里 rollback，让异常向上传播或继续处理下一个
-                # 最终的 commit/rollback 由 extract_from_messages 统一处理
 
         # 不在这里 commit，等待所有类型的记忆都存储完后统一 commit（保证原子性）
         return count
