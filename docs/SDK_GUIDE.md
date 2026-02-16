@@ -151,7 +151,7 @@ results = await nm.search(
     user_id="alice",
     query="meetings",
     memory_type="episodic",
-    limit=10,
+    limit=20,
 )
 
 # 结果格式
@@ -170,16 +170,16 @@ for r in results:
 
 ```python
 # 设置（支持任意 JSON 值）
-await nm.kv.set("preferences", "alice", "language", "zh-CN")
-await nm.kv.set("preferences", "alice", "theme", {"mode": "dark"})
-await nm.kv.set("settings", "global", "max_tokens", 4096)
+await nm.kv.set("alice", "preferences", "language", "zh-CN")
+await nm.kv.set("alice", "preferences", "theme", {"mode": "dark"})
+await nm.kv.set("global", "settings", "max_tokens", 4096)
 
 # 获取
-value = await nm.kv.get("preferences", "alice", "language")
+value = await nm.kv.get("alice", "preferences", "language")
 # 返回 "zh-CN"，不存在返回 None
 
 # 删除
-deleted = await nm.kv.delete("preferences", "alice", "language")
+deleted = await nm.kv.delete("alice", "preferences", "language")
 # 返回 True/False
 ```
 
@@ -187,15 +187,15 @@ deleted = await nm.kv.delete("preferences", "alice", "language")
 
 ```python
 # 列出 namespace + scope 下所有键值
-items = await nm.kv.list("preferences", "alice")
+items = await nm.kv.list("alice", "preferences")
 for item in items:
     print(f"{item.key}: {item.value}")
 
 # 按前缀过滤
-items = await nm.kv.list("preferences", "alice", prefix="theme")
+items = await nm.kv.list("alice", "preferences", prefix="theme")
 
 # 批量设置
-await nm.kv.batch_set("preferences", "alice", {
+await nm.kv.batch_set("alice", "preferences", {
     "language": "zh-CN",
     "theme": {"mode": "dark"},
     "font_size": 14,
@@ -355,13 +355,13 @@ node = await nm.graph.create_node(
 )
 
 # 获取节点
-node = await nm.graph.get_node(NodeType.USER, "alice")
+node = await nm.graph.get_node("alice", NodeType.USER, "alice")
 
 # 更新节点
-await nm.graph.update_node(NodeType.USER, "alice", {"age": 31})
+await nm.graph.update_node("alice", NodeType.USER, "alice", {"age": 31})
 
 # 删除节点（同时删除相关边）
-await nm.graph.delete_node(NodeType.USER, "alice")
+await nm.graph.delete_node("alice", NodeType.USER, "alice")
 ```
 
 ### 7.3 关系 CRUD
@@ -396,15 +396,15 @@ await nm.graph.delete_edge(
 ```python
 # 获取邻居
 neighbors = await nm.graph.get_neighbors(
-    NodeType.USER, "alice",
+    "alice", NodeType.USER, "alice",
     edge_types=[EdgeType.INTERESTED_IN],
     direction="out",
-    limit=10,
+    limit=20,
 )
 
 # 查找路径
 path = await nm.graph.find_path(
-    NodeType.USER, "alice",
+    "alice", NodeType.USER, "alice",
     NodeType.TOPIC, "machine-learning",
     max_depth=3,
 )

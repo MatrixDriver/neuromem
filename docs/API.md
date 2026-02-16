@@ -355,13 +355,13 @@ await nm.add_memory(
 
 ### recall() - 混合检索
 
-**三因子向量检索 + 图实体检索**，综合召回相关记忆（推荐使用）。
+**RRF 混合检索（向量 + BM25）+ 图实体检索**，综合召回相关记忆（推荐使用）。评分公式为 `rrf_score × recency × importance`，其中 rrf_score 通过 Reciprocal Rank Fusion 融合向量相似度和 BM25 关键词匹配。
 
 ```python
 result = await nm.recall(
     user_id: str,
     query: str,
-    limit: int = 10,
+    limit: int = 20,
     decay_rate: float | None = None,
 ) -> dict
 ```
@@ -372,7 +372,7 @@ result = await nm.recall(
 |------|------|--------|------|
 | `user_id` | `str` | - | 用户 ID |
 | `query` | `str` | - | 查询文本 |
-| `limit` | `int` | `10` | 返回结果数量 |
+| `limit` | `int` | `20` | 返回结果数量 |
 | `decay_rate` | `float` | `86400*30` | 时间衰减率（秒），30 天 |
 
 **返回格式**：
@@ -412,10 +412,11 @@ result = await nm.recall(
 **评分公式**：
 
 ```python
-score = relevance × recency × importance
+score = rrf_score × recency × importance
 
-# 相关性 (0-1)：余弦相似度
-relevance = 1 - cosine_distance(query_vec, memory_vec)
+# RRF 评分 (0-1)：融合向量相似度和 BM25 关键词匹配
+# rrf_score = 1/(k+rank_vector) + 1/(k+rank_bm25)，k=60
+rrf_score = reciprocal_rank_fusion(vector_similarity, bm25_score)
 
 # 时效性 (0-1)：指数衰减，情感唤醒减缓遗忘
 recency = e^(-t / (decay_rate × (1 + arousal × 0.5)))
@@ -441,9 +442,9 @@ print(f"图检索: {len(result['graph_results'])} 条")
 
 ---
 
-### search() - 向量检索
+### search() - 混合检索（向量 + BM25）
 
-纯向量相似度检索（不考虑时间和重要性）。
+混合检索，通过 Reciprocal Rank Fusion 融合向量相似度和 BM25 关键词匹配（不考虑时间和重要性）。
 
 ```python
 results = await nm.search(
@@ -453,6 +454,8 @@ results = await nm.search(
     memory_type: str | None = None,
     created_after: datetime | None = None,
     created_before: datetime | None = None,
+    event_after: datetime | None = None,
+    event_before: datetime | None = None,
 ) -> list[dict]
 ```
 
@@ -464,8 +467,10 @@ results = await nm.search(
 | `query` | `str` | - | 查询文本 |
 | `limit` | `int` | `5` | 返回结果数量 |
 | `memory_type` | `str` | `None` | 过滤记忆类型 |
-| `created_after` | `datetime` | `None` | 只返回该时间之后的记忆 |
-| `created_before` | `datetime` | `None` | 只返回该时间之前的记忆 |
+| `created_after` | `datetime` | `None` | 只返回该时间之后创建的记忆 |
+| `created_before` | `datetime` | `None` | 只返回该时间之前创建的记忆 |
+| `event_after` | `datetime` | `None` | 只返回事件时间在该时间之后的记忆 |
+| `event_before` | `datetime` | `None` | 只返回事件时间在该时间之前的记忆 |
 
 **返回格式**：
 
@@ -477,7 +482,9 @@ results = await nm.search(
         "memory_type": "fact",
         "metadata": {...},
         "created_at": "2024-01-01T00:00:00",
-        "distance": 0.12,  # 余弦距离，越小越相似
+        "vector_score": 0.88,  # 向量相似度分数
+        "bm25_score": 12.5,    # BM25 关键词匹配分数
+        "rrf_score": 0.032,    # RRF 融合分数
     },
     ...
 ]
@@ -504,8 +511,8 @@ insights = await nm.search(
 
 | 特性 | recall() | search() |
 |------|----------|----------|
-| **检索方式** | 三因子向量 + 图检索 | 纯向量检索 |
-| **评分因素** | 相关性 × 时效性 × 重要性 | 仅相关性（余弦相似度） |
+| **检索方式** | RRF 混合检索 + 图检索 | RRF 混合检索（向量 + BM25） |
+| **评分因素** | rrf_score × 时效性 × 重要性 | 仅 rrf_score |
 | **结果来源** | vector_results + graph_results + merged | 单一列表 |
 | **时间衰减** | ✅ 支持（近期记忆优先） | ❌ 不考虑时间 |
 | **重要性** | ✅ 支持（重要记忆优先） | ❌ 不考虑重要性 |
@@ -655,8 +662,8 @@ await nm.reflect(user_id)  # 分析记忆，生成洞察
 
 ```python
 await nm.kv.set(
+    user_id: str,
     namespace: str,
-    scope: str,
     key: str,
     value: Any,
 ) -> None
@@ -666,8 +673,8 @@ await nm.kv.set(
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
+| `user_id` | `str` | 用户 ID |
 | `namespace` | `str` | 命名空间（如 `"preferences"`, `"config"`） |
-| `scope` | `str` | 作用域，通常是 `user_id` |
 | `key` | `str` | 键名 |
 | `value` | `Any` | 值（支持 str, int, float, bool, dict, list, None） |
 
@@ -675,19 +682,19 @@ await nm.kv.set(
 
 ```python
 # 存储用户偏好
-await nm.kv.set("preferences", "alice", "language", "zh-CN")
-await nm.kv.set("preferences", "alice", "theme", {"mode": "dark", "color": "blue"})
+await nm.kv.set("alice", "preferences", "language", "zh-CN")
+await nm.kv.set("alice", "preferences", "theme", {"mode": "dark", "color": "blue"})
 
 # 存储配置
-await nm.kv.set("config", "alice", "model", "gpt-4")
+await nm.kv.set("alice", "config", "model", "gpt-4")
 ```
 
 ### nm.kv.get()
 
 ```python
 value = await nm.kv.get(
+    user_id: str,
     namespace: str,
-    scope: str,
     key: str,
 ) -> Any | None
 ```
@@ -697,10 +704,10 @@ value = await nm.kv.get(
 **示例**：
 
 ```python
-lang = await nm.kv.get("preferences", "alice", "language")
+lang = await nm.kv.get("alice", "preferences", "language")
 print(lang)  # "zh-CN"
 
-theme = await nm.kv.get("preferences", "alice", "theme")
+theme = await nm.kv.get("alice", "preferences", "theme")
 print(theme)  # {"mode": "dark", "color": "blue"}
 ```
 
@@ -708,8 +715,8 @@ print(theme)  # {"mode": "dark", "color": "blue"}
 
 ```python
 items = await nm.kv.list(
+    user_id: str,
     namespace: str,
-    scope: str,
     prefix: str = "",
 ) -> list[dict]
 ```
@@ -727,8 +734,8 @@ items = await nm.kv.list(
 
 ```python
 await nm.kv.delete(
+    user_id: str,
     namespace: str,
-    scope: str,
     key: str,
 ) -> bool
 ```
@@ -739,8 +746,8 @@ await nm.kv.delete(
 
 ```python
 await nm.kv.batch_set(
+    user_id: str,
     namespace: str,
-    scope: str,
     items: dict[str, Any],
 ) -> None
 ```
@@ -748,7 +755,7 @@ await nm.kv.batch_set(
 **示例**：
 
 ```python
-await nm.kv.batch_set("preferences", "alice", {
+await nm.kv.batch_set("alice", "preferences", {
     "language": "zh-CN",
     "timezone": "Asia/Shanghai",
     "theme": {"mode": "dark"},
@@ -952,6 +959,7 @@ docs = await nm.files.list(
 
 ```python
 doc = await nm.files.get(
+    user_id: str,
     file_id: str,
 ) -> Document | None
 ```
@@ -960,6 +968,7 @@ doc = await nm.files.get(
 
 ```python
 success = await nm.files.delete(
+    user_id: str,
     file_id: str,
 ) -> bool
 ```
@@ -1073,6 +1082,7 @@ await nm.graph.create_edge(
 
 ```python
 node = await nm.graph.get_node(
+    user_id: str,
     node_type: NodeType,
     node_id: str,
 ) -> dict | None
@@ -1082,6 +1092,7 @@ node = await nm.graph.get_node(
 
 ```python
 neighbors = await nm.graph.get_neighbors(
+    user_id: str,
     node_type: NodeType,
     node_id: str,
     edge_types: list[EdgeType] | None = None,
@@ -1262,7 +1273,7 @@ async def main():
             print(f"[{mem['source']}] {mem['content']}")
 
         # 4. 查询偏好
-        lang = await nm.kv.get("preferences", user_id, "language")
+        lang = await nm.kv.get(user_id, "preferences", "language")
 
         # 5. 定期整理
         await nm.reflect(user_id=user_id)
@@ -1296,7 +1307,7 @@ except Exception as e:
 await nm.conversations.add_messages_batch(user_id, messages)
 
 # 批量设置 KV
-await nm.kv.batch_set(namespace, scope, items)
+await nm.kv.batch_set(user_id, namespace, items)
 
 # 批量 embedding
 texts = ["text1", "text2", ...]

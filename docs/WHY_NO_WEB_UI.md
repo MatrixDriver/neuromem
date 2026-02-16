@@ -80,7 +80,7 @@ for r in results:
     print(f"{r['content']} (score: {r['score']:.2f})")
 
 # 获取所有 KV 配置
-items = await nm.kv.list("preferences", "alice")
+items = await nm.kv.list("alice", "preferences")
 print(items)
 
 # 查看对话历史
@@ -157,7 +157,7 @@ if query:
 
 # KV 配置界面
 if st.button("Show Preferences"):
-    prefs = await nm.kv.list("preferences", st.session_state.user_id)
+    prefs = await nm.kv.list(st.session_state.user_id, "preferences")
     st.json(prefs)
 ```
 
@@ -197,7 +197,7 @@ async def search(user_id: str, query: str):
 
 @app.get("/api/kv/{namespace}")
 async def get_kv(namespace: str, user_id: str):
-    items = await nm.kv.list(namespace, user_id)
+    items = await nm.kv.list(user_id, namespace)
     return {"items": items}
 ```
 

@@ -161,20 +161,20 @@ async with NeuroMemory(
 
 ```python
 # 存储
-await nm.kv.set("preferences", "alice", "language", "zh-CN")
-await nm.kv.set("preferences", "alice", "theme", {"mode": "dark", "color": "blue"})
+await nm.kv.set("alice", "preferences", "language", "zh-CN")
+await nm.kv.set("alice", "preferences", "theme", {"mode": "dark", "color": "blue"})
 
 # 读取
-value = await nm.kv.get("preferences", "alice", "language")
+value = await nm.kv.get("alice", "preferences", "language")
 print(value)  # "zh-CN"
 
 # 列出
-items = await nm.kv.list("preferences", "alice")
+items = await nm.kv.list("alice", "preferences")
 for item in items:
     print(f"  {item.key}: {item.value}")
 
 # 删除
-await nm.kv.delete("preferences", "alice", "language")
+await nm.kv.delete("alice", "preferences", "language")
 ```
 
 ### 4.2 对话管理
@@ -236,7 +236,7 @@ async with NeuroMemory(
     docs = await nm.files.list_documents(user_id="alice")
 
     # 删除文件
-    await nm.files.delete(file_id=doc.id)
+    await nm.files.delete(user_id="alice", file_id=doc.id)
 ```
 
 启动 MinIO：

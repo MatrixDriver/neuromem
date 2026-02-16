@@ -148,10 +148,10 @@ NeuroMemory 提供 7 种记忆类型，每种有不同的存储和获取方式�
 
 | 记忆类型 | 存储方式 | 底层存储 | 获取方式 | 示例 |
 |---------|---------|---------|---------|------|
-| **偏好** | KV Store | PostgreSQL | `nm.kv.get("preferences", user_id, key)` | `language=zh-CN` |
+| **偏好** | KV Store | PostgreSQL | `nm.kv.get(user_id, "preferences", key)` | `language=zh-CN` |
 | **事实** | Embedding + Graph | pgvector + Apache AGE | `nm.recall(user_id, query)` | "在 Google 工作" |
 | **情景** | Embedding | pgvector | `nm.recall(user_id, query)` | "昨天面试很紧张" |
-| **关系** | Graph Store | Apache AGE | `nm.graph.get_neighbors(type, id)` | `(user)-[works_at]->(Google)` |
+| **关系** | Graph Store | Apache AGE | `nm.graph.get_neighbors(user_id, type, id)` | `(user)-[works_at]->(Google)` |
 | **洞察** | Embedding | pgvector | `nm.search(user_id, query, memory_type="insight")` | "用户倾向于晚上工作" |
 | **情感画像** | Table | PostgreSQL | `reflect()` 自动更新 | "容易焦虑，对技术兴奋" |
 | **通用** | Embedding | pgvector | `nm.search(user_id, query)` | 手动 `add_memory()` 的内容 |
@@ -161,11 +161,11 @@ NeuroMemory 提供 7 种记忆类型，每种有不同的存储和获取方式�
 不是简单的向量数据库封装。`recall()` 综合三个因子评分并融合图谱遍历：
 
 ```python
-Score = relevance × recency × importance
+Score = rrf_score × recency × importance
 
-relevance = 1 - cosine_distance                         # 语义相似度 (0-1)
-recency   = e^(-t / decay_rate × (1 + arousal × 0.5))   # 时效性，高情感唤醒衰减更慢
-importance = metadata.importance / 10                    # LLM 评估的重要性 (0.1-1.0)
+rrf_score  = RRF(vector_rank, bm25_rank)                 # 向量 + BM25 关键词混合检索 (RRF 融合)
+recency    = e^(-t / decay_rate × (1 + arousal × 0.5))   # 时效性，高情感唤醒衰减更慢
+importance = metadata.importance / 10                     # LLM 评估的重要性 (0.1-1.0)
 ```
 
 | 对比维度 | 纯向量检索 | 三因子检索 |
@@ -340,7 +340,7 @@ class MemoryAgent:
         memories = recall_result["merged"]
 
         # 获取用户偏好
-        language = await self.nm.kv.get("preferences", user_id, "language") or "zh-CN"
+        language = await self.nm.kv.get(user_id, "preferences", "language") or "zh-CN"
 
         # 获取近期洞察
         insights = await self.nm.search(user_id, user_input, memory_type="insight", limit=3)
