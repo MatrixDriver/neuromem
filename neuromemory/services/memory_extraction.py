@@ -509,17 +509,27 @@ Return format (JSON only, no other content):
         user_id: str,
         facts: list[dict],
     ) -> int:
+        # Filter valid facts
+        valid_facts = [f for f in facts if f.get("content")]
+        if not valid_facts:
+            return 0
+
+        # Batch embed all contents in one API call
+        contents = [f["content"] for f in valid_facts]
+        try:
+            vectors = await self._embedding.embed_batch(contents)
+        except Exception as e:
+            logger.error("Failed to batch embed facts: %s", e, exc_info=True)
+            return 0
+
         count = 0
-        for fact in facts:
-            content = fact.get("content")
-            category = fact.get("category", "general")
-            confidence = fact.get("confidence", 1.0)
-            importance = fact.get("importance")
-            emotion = fact.get("emotion")
-            if not content:
-                continue
+        for fact, embedding_vector in zip(valid_facts, vectors):
             try:
-                embedding_vector = await self._embedding.embed(content)
+                content = fact["content"]
+                category = fact.get("category", "general")
+                confidence = fact.get("confidence", 1.0)
+                importance = fact.get("importance")
+                emotion = fact.get("emotion")
                 meta = {
                     "category": category,
                     "confidence": confidence,
@@ -548,7 +558,6 @@ Return format (JSON only, no other content):
             except Exception as e:
                 logger.error("Failed to store fact: %s", e, exc_info=True)
 
-        # 不在这里 commit，等待所有类型的记忆都存储完后统一 commit（保证原子性）
         return count
 
     async def _store_episodes(
@@ -556,20 +565,30 @@ Return format (JSON only, no other content):
         user_id: str,
         episodes: list[dict],
     ) -> int:
+        # Filter valid episodes
+        valid_episodes = [e for e in episodes if e.get("content")]
+        if not valid_episodes:
+            return 0
+
+        # Batch embed all contents in one API call
+        contents = [e["content"] for e in valid_episodes]
+        try:
+            vectors = await self._embedding.embed_batch(contents)
+        except Exception as e:
+            logger.error("Failed to batch embed episodes: %s", e, exc_info=True)
+            return 0
+
         count = 0
-        for episode in episodes:
-            content = episode.get("content")
-            timestamp = episode.get("timestamp")
-            timestamp_original = episode.get("timestamp_original")
-            people = episode.get("people")
-            location = episode.get("location")
-            confidence = episode.get("confidence", 1.0)
-            importance = episode.get("importance")
-            emotion = episode.get("emotion")
-            if not content:
-                continue
+        for episode, embedding_vector in zip(valid_episodes, vectors):
             try:
-                embedding_vector = await self._embedding.embed(content)
+                content = episode["content"]
+                timestamp = episode.get("timestamp")
+                timestamp_original = episode.get("timestamp_original")
+                people = episode.get("people")
+                location = episode.get("location")
+                confidence = episode.get("confidence", 1.0)
+                importance = episode.get("importance")
+                emotion = episode.get("emotion")
                 meta = {
                     "timestamp": timestamp,
                     "confidence": confidence,
@@ -604,7 +623,6 @@ Return format (JSON only, no other content):
             except Exception as e:
                 logger.error("Failed to store episode: %s", e, exc_info=True)
 
-        # 不在这里 commit，等待所有类型的记忆都存储完后统一 commit（保证原子性）
         return count
 
     async def _store_triples(
