@@ -748,6 +748,20 @@ class NeuroMemory:
                 )
                 graph_results.extend(user_facts)
 
+        # 4. Read user profile from KV store
+        user_profile: dict[str, str | list[str]] = {}
+        try:
+            from neuromemory.services.kv import KVService
+            async with self._db.session() as session:
+                kv_svc = KVService(session)
+                profile_keys = ["identity", "occupation", "interests", "values", "relationships", "personality"]
+                for key in profile_keys:
+                    kv = await kv_svc.get("profile", user_id, key)
+                    if kv and kv.value:
+                        user_profile[key] = kv.value
+        except Exception as e:
+            logger.warning(f"Failed to read user profile: {e}")
+
         # Deduplicate by content
         seen_contents: set[str] = set()
         merged: list[dict] = []
@@ -798,6 +812,7 @@ class NeuroMemory:
             "conversation_results": conversation_results,
             "graph_results": graph_results,
             "graph_context": graph_context,
+            "user_profile": user_profile,
             "merged": merged[:limit],
         }
 

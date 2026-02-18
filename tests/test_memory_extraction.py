@@ -115,7 +115,7 @@ async def test_parse_classification_result():
 
     # Invalid JSON
     result3 = svc._parse_classification_result("not json")
-    assert result3 == {"preferences": [], "facts": [], "episodes": [], "triples": []}
+    assert result3 == {"preferences": [], "facts": [], "episodes": [], "triples": [], "profile_updates": {}}
 
 
 @pytest.mark.asyncio

@@ -169,6 +169,13 @@ async def _query(cfg: EvalConfig, conversations: list[LoCoMoConversation]) -> No
                             graph_lines = "\n".join(f"- {t}" for t in all_graph[:20])
                             graph_section = f"\n\nKnown relationships:\n{graph_lines}"
 
+                        # Collect user profiles
+                        profile_a = recall_a.get("user_profile", {})
+                        profile_b = recall_b.get("user_profile", {})
+                        profile_section = _format_profiles(
+                            user_a, profile_a, user_b, profile_b,
+                        )
+
                         # Merge for counting
                         memories = _merge_memories(memories_a, memories_b)
 
@@ -178,7 +185,7 @@ async def _query(cfg: EvalConfig, conversations: list[LoCoMoConversation]) -> No
                             speaker_2=user_b,
                             speaker_1_memories=mem_text_a,
                             speaker_2_memories=mem_text_b,
-                        ) + graph_section
+                        ) + graph_section + profile_section
                         predicted = await answer_llm.chat([
                             {"role": "system", "content": system_content},
                             {"role": "user", "content": LOCOMO_ANSWER_USER.format(
@@ -228,6 +235,40 @@ async def _query(cfg: EvalConfig, conversations: list[LoCoMoConversation]) -> No
     logger.info(
         "Query phase complete: %d results", len(checkpoint["results"]),
     )
+
+
+def _format_profiles(
+    user_a: str, profile_a: dict,
+    user_b: str, profile_b: dict,
+) -> str:
+    """Format user profiles as additional context for the answer prompt."""
+    lines: list[str] = []
+    for user, profile in [(user_a, profile_a), (user_b, profile_b)]:
+        if not profile:
+            continue
+        parts: list[str] = []
+        if profile.get("identity"):
+            parts.append(f"Identity: {profile['identity']}")
+        if profile.get("occupation"):
+            parts.append(f"Occupation: {profile['occupation']}")
+        if profile.get("interests"):
+            items = profile["interests"] if isinstance(profile["interests"], list) else [profile["interests"]]
+            parts.append(f"Interests: {', '.join(items)}")
+        if profile.get("values"):
+            items = profile["values"] if isinstance(profile["values"], list) else [profile["values"]]
+            parts.append(f"Values: {', '.join(items)}")
+        if profile.get("relationships"):
+            items = profile["relationships"] if isinstance(profile["relationships"], list) else [profile["relationships"]]
+            parts.append(f"Relationships: {', '.join(items)}")
+        if profile.get("personality"):
+            items = profile["personality"] if isinstance(profile["personality"], list) else [profile["personality"]]
+            parts.append(f"Personality: {', '.join(items)}")
+        if parts:
+            lines.append(f"{user}: {'; '.join(parts)}")
+
+    if not lines:
+        return ""
+    return "\n\nUser profiles:\n" + "\n".join(f"- {line}" for line in lines)
 
 
 def _merge_memories(

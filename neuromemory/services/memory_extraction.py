@@ -117,6 +117,15 @@ class MemoryExtractionService:
                 logger.error(f"❌ 存储 triples 失败: {e}", exc_info=True)
                 triples_count = 0
 
+        # Store profile updates to KV store
+        profile_updates = classified.get("profile_updates", {})
+        if profile_updates:
+            try:
+                await self._store_profile_updates(user_id, profile_updates)
+                logger.info(f"✅ 存储 profile_updates 成功: {list(profile_updates.keys())}")
+            except Exception as e:
+                logger.error(f"❌ 存储 profile_updates 失败: {e}", exc_info=True)
+
         # 统一提交所有记忆（preferences, facts, episodes, triples）
         # 保证原子性：要么全部成功，要么全部失败
         total_count = prefs_count + facts_count + episodes_count + triples_count
@@ -264,7 +273,9 @@ class MemoryExtractionService:
         """Build Chinese classification prompt (original)."""
         triples_section = ""
         triples_output = ""
+        profile_num = 5
         if self._graph_enabled:
+            profile_num = 6
             triples_section = """
 5. **Triples（实体关系三元组）**: 从 Facts 和 Episodes 中提取的结构化关系
    - 格式: {{"subject": "主体", "subject_type": "类型", "relation": "关系", "object": "客体", "object_type": "类型", "content": "原始描述", "confidence": 0.0-1.0}}
@@ -285,6 +296,15 @@ class MemoryExtractionService:
    - 将计算后的绝对时间存入 "timestamp" 字段，使用 ISO 8601 格式（如 "2023-05-06"）
    - 同时将原始时间表达保留在 "timestamp_original" 字段中
 """
+
+        profile_section_zh = f"""{profile_num}. **Profile Updates（用户画像更新）**: 从对话中提取的用户画像信息
+   - 只在对话中**明确提到**相关信息时才输出对应字段，没有信息的字段不要包含
+   - identity: 用户的姓名、年龄、性别等核心身份信息（字符串，如"张三，男，28岁"）
+   - occupation: 用户的职业/公司/职位信息（字符串，如"Google 软件工程师"）
+   - interests: 用户的兴趣爱好列表（字符串数组，如["摄影", "徒步"]）
+   - values: 用户的价值观和信念（字符串数组，如["重视家庭", "环保意识强"]）
+   - relationships: 用户的人际关系（字符串数组，如["妻子 Emily", "朋友 Tom"]）
+   - personality: 用户的性格特征（字符串数组，如["外向", "乐观"]）"""
 
         return f"""分析以下对话，提取用户的记忆信息。请严格按照 JSON 格式返回结果。
 
@@ -340,6 +360,8 @@ class MemoryExtractionService:
    - 同时提取具体事实和概念性/抽象信息（计划、兴趣、价值观、推理链）
 {triples_section}
 
+{profile_section_zh}
+
 要求：
 - 只提取明确提到的信息，不要推测
 - confidence 表示提取的确信度 (0.0-1.0)
@@ -351,7 +373,8 @@ class MemoryExtractionService:
 {{
   "preferences": [...],
   "facts": [...],
-  "episodes": [...]{triples_output}
+  "episodes": [...]{triples_output},
+  "profile_updates": {{...}}
 }}
 ```"""
 
@@ -359,6 +382,7 @@ class MemoryExtractionService:
         """Build English classification prompt for English conversations."""
         triples_section = ""
         triples_output = ""
+        profile_num = 5
         if self._graph_enabled:
             triples_section = """
 5. **Triples (Entity-Relation Triples)**: Structured relationships extracted from Facts and Episodes
@@ -369,6 +393,7 @@ class MemoryExtractionService:
    - For user's own: subject="user", subject_type="user"
    - Extract corresponding triple for each Fact and Episode when possible"""
             triples_output = ',\n  "triples": [...]'
+            profile_num = 6
 
         temporal_section = ""
         if session_timestamp:
@@ -380,6 +405,15 @@ class MemoryExtractionService:
    - Store computed absolute time in the "timestamp" field as ISO 8601 format (e.g. "2023-05-06")
    - Also preserve the original expression in "timestamp_original" field
 """
+
+        profile_section_en = f"""{profile_num}. **Profile Updates**: User profile information extracted from the conversation
+   - Only include fields that are **explicitly mentioned** in the conversation. Omit fields with no information.
+   - identity: User's name, age, gender, and other core identity info (string, e.g. "John Smith, male, 28 years old")
+   - occupation: User's job title, company, role (string, e.g. "Software engineer at Google")
+   - interests: User's hobbies and interests (string array, e.g. ["photography", "hiking"])
+   - values: User's values and beliefs (string array, e.g. ["values family", "environmentally conscious"])
+   - relationships: User's interpersonal relationships (string array, e.g. ["wife Emily", "friend Tom"])
+   - personality: User's personality traits (string array, e.g. ["extroverted", "optimistic"])"""
 
         return f"""Extract structured memory information from the following conversation. Return results strictly in JSON format.
 
@@ -435,6 +469,8 @@ Extract the following memories:
    - Extract both concrete facts AND conceptual/abstract information (plans, interests, values, reasoning)
 {triples_section}
 
+{profile_section_en}
+
 Requirements:
 - Only extract explicitly mentioned information, do not infer
 - Confidence represents extraction certainty (0.0-1.0)
@@ -446,7 +482,8 @@ Return format (JSON only, no other content):
 {{
   "preferences": [...],
   "facts": [...],
-  "episodes": [...]{triples_output}
+  "episodes": [...]{triples_output},
+  "profile_updates": {{...}}
 }}
 ```"""
 
@@ -483,19 +520,24 @@ Return format (JSON only, no other content):
             if not isinstance(triples, list):
                 triples = []
 
+            profile_updates = result.get("profile_updates", {})
+            if not isinstance(profile_updates, dict):
+                profile_updates = {}
+
             return {
                 "preferences": preferences,
                 "facts": facts,
                 "episodes": episodes,
                 "triples": triples,
+                "profile_updates": profile_updates,
             }
 
         except json.JSONDecodeError as e:
             logger.error("Failed to parse JSON from classification result: %s", e)
-            return {"preferences": [], "facts": [], "episodes": [], "triples": []}
+            return {"preferences": [], "facts": [], "episodes": [], "triples": [], "profile_updates": {}}
         except Exception as e:
             logger.error("Error parsing classification result: %s", e)
-            return {"preferences": [], "facts": [], "episodes": [], "triples": []}
+            return {"preferences": [], "facts": [], "episodes": [], "triples": [], "profile_updates": {}}
 
     async def _store_preferences(
         self,
@@ -719,3 +761,48 @@ Return format (JSON only, no other content):
         except Exception as e:
             logger.error("Failed to store triples: %s", e)
             return 0
+
+    # Keys that are overwritten each time (latest value wins)
+    _PROFILE_OVERWRITE_KEYS = {"identity", "occupation"}
+    # Keys that are append+dedup (accumulate over time)
+    _PROFILE_APPEND_KEYS = {"interests", "values", "relationships", "personality"}
+
+    async def _store_profile_updates(
+        self,
+        user_id: str,
+        profile_updates: dict,
+    ) -> None:
+        """Store user profile updates to KV store.
+
+        - identity, occupation: overwrite (string)
+        - interests, values, relationships, personality: append+dedup (list)
+        """
+        kv_service = KVService(self.db)
+
+        for key, value in profile_updates.items():
+            if key not in self._PROFILE_OVERWRITE_KEYS | self._PROFILE_APPEND_KEYS:
+                continue
+
+            if key in self._PROFILE_OVERWRITE_KEYS:
+                # Simple overwrite
+                if value:
+                    await kv_service.set("profile", user_id, key, value)
+            else:
+                # Append + dedup for list fields
+                new_items = value if isinstance(value, list) else [value]
+                new_items = [item for item in new_items if item]
+                if not new_items:
+                    continue
+
+                existing = await kv_service.get("profile", user_id, key)
+                if existing and isinstance(existing.value, list):
+                    # Merge: existing + new, dedup by lowercase
+                    seen = {item.lower() for item in existing.value}
+                    merged = list(existing.value)
+                    for item in new_items:
+                        if item.lower() not in seen:
+                            seen.add(item.lower())
+                            merged.append(item)
+                    await kv_service.set("profile", user_id, key, merged)
+                else:
+                    await kv_service.set("profile", user_id, key, new_items)
