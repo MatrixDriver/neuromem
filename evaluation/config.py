@@ -74,7 +74,7 @@ class EvalConfig:
 
     # Pipeline settings
     extraction_batch_size: int = 50
-    recall_limit: int = 10
+    recall_limit: int = 20
     graph_enabled: bool = field(
         default_factory=lambda: os.environ.get("GRAPH_ENABLED", "0") == "1"
     )
