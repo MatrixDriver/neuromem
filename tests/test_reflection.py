@@ -243,7 +243,7 @@ async def test_reflect_facade_method(db_session, mock_embedding):
     )
 
     # v0.2.0: reflect() only generates insights and updates emotion profile
-    result = await nm.reflect("facade_user", limit=10)
+    result = await nm.reflect("facade_user", batch_size=10)
 
     # Check insight generation (no extraction counters in v0.2.0)
     assert "insights_generated" in result

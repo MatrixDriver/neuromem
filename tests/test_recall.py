@@ -823,7 +823,7 @@ class TestRecallFullPipeline:
         assert len(recall_result["merged"]) > 0
 
         # v0.2.0: reflect() only generates insights (no extraction)
-        result = await nm_with_llm.reflect(user_id=user_id, limit=50)
+        result = await nm_with_llm.reflect(user_id=user_id, batch_size=50)
         assert "insights_generated" in result
         assert "insights" in result
         assert "emotion_profile" in result

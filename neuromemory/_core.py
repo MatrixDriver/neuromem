@@ -748,34 +748,9 @@ class NeuroMemory:
                 )
                 graph_results.extend(user_facts)
 
-        # 4. Fetch emotion profile for user context
-        emotion_context: str | None = None
-        try:
-            from sqlalchemy import text as sql_text
-            async with self._db.session() as session:
-                row = (await session.execute(
-                    sql_text("""
-                        SELECT latest_state, dominant_emotions
-                        FROM emotion_profiles WHERE user_id = :uid
-                    """),
-                    {"uid": user_id},
-                )).first()
-                if row and row.latest_state:
-                    emotion_context = row.latest_state
-        except Exception as e:
-            logger.debug("Failed to fetch emotion profile: %s", e)
-
         # Deduplicate by content
         seen_contents: set[str] = set()
         merged: list[dict] = []
-
-        # Inject emotion profile as leading context (helps open-domain questions)
-        if emotion_context:
-            merged.append({
-                "content": f"[Emotion Profile] {emotion_context}",
-                "source": "emotion_profile",
-                "memory_type": "emotion_profile",
-            })
 
         for r in vector_results:
             content = r.get("content", "")

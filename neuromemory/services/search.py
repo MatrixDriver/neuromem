@@ -204,6 +204,7 @@ class SearchService:
         query_embedding: list[float] | None = None,
         event_after: str | None = None,
         event_before: str | None = None,
+        exclude_types: list[str] | None = None,
     ) -> list[dict]:
         """Three-factor scored search with BM25 hybrid: relevance x recency x importance.
 
@@ -234,6 +235,12 @@ class SearchService:
         if memory_type:
             filters += " AND memory_type = :memory_type"
             params["memory_type"] = memory_type
+
+        if exclude_types:
+            placeholders = ", ".join(f":excl_{i}" for i in range(len(exclude_types)))
+            filters += f" AND memory_type NOT IN ({placeholders})"
+            for i, t in enumerate(exclude_types):
+                params[f"excl_{i}"] = t
 
         if event_after:
             filters += " AND extracted_timestamp >= :event_after"

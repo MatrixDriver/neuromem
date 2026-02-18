@@ -31,6 +31,9 @@ evaluation/data/*.json
 evaluation/results/*.json
 evaluation/results/*.tmp
 
+# Worktrees
+.worktrees/
+
 # 临时文件
 nul
 Untitled

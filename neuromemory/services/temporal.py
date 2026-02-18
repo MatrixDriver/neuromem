@@ -82,6 +82,24 @@ class TemporalExtractor:
         "friday": 4, "saturday": 5, "sunday": 6,
     }
 
+    # Season mappings (month ranges: start of season)
+    _EN_SEASON_MAP = {
+        "spring": (3, 1), "summer": (6, 1), "fall": (9, 1), "autumn": (9, 1), "winter": (12, 1),
+    }
+    _ZH_SEASON_MAP = {
+        "春天": (3, 1), "春季": (3, 1), "夏天": (6, 1), "夏季": (6, 1),
+        "秋天": (9, 1), "秋季": (9, 1), "冬天": (12, 1), "冬季": (12, 1),
+    }
+    _EN_SEASON_RE = re.compile(
+        r"(?:last\s+)?(spring|summer|fall|autumn|winter)(?:\s+(\d{4}))?",
+        re.IGNORECASE,
+    )
+    _ZH_SEASON_RE = re.compile(r"(?:去年)?(?:的)?(春天|春季|夏天|夏季|秋天|秋季|冬天|冬季)")
+
+    # Quarter patterns
+    _EN_QUARTER_RE = re.compile(r"Q([1-4])[\s,]*(\d{4})", re.IGNORECASE)
+    _ZH_QUARTER_RE = re.compile(r"(\d{4})年?第?([一二三四1-4])季度")
+
     def extract(self, text: str, reference_time: datetime | None = None) -> datetime | None:
         """Extract a timestamp from text.
 
@@ -108,6 +126,10 @@ class TemporalExtractor:
             self._try_en_absolute,
             self._try_zh_full,
             self._try_zh_partial,
+            self._try_en_season,
+            self._try_zh_season,
+            self._try_en_quarter,
+            self._try_zh_quarter,
             self._try_en_relative,
             self._try_zh_relative,
         ]:
@@ -269,6 +291,61 @@ class TemporalExtractor:
         if self._ZH_REL_LAST_YEAR.search(text):
             return self._subtract_unit(ref, 1, "year")
 
+        return None
+
+    def _try_en_season(self, text: str, ref: datetime) -> datetime | None:
+        m = self._EN_SEASON_RE.search(text)
+        if m:
+            season = m.group(1).lower()
+            year_str = m.group(2)
+            month, day = self._EN_SEASON_MAP.get(season, (None, None))
+            if month is None:
+                return None
+            if year_str:
+                year = int(year_str)
+            elif "last" in text.lower():
+                year = ref.year - 1
+            else:
+                # Current or most recent occurrence
+                candidate = datetime(ref.year, month, day, tzinfo=ref.tzinfo)
+                year = ref.year if candidate <= ref else ref.year - 1
+            return datetime(year, month, day, tzinfo=ref.tzinfo)
+        return None
+
+    def _try_zh_season(self, text: str, ref: datetime) -> datetime | None:
+        m = self._ZH_SEASON_RE.search(text)
+        if m:
+            season = m.group(1)
+            month, day = self._ZH_SEASON_MAP.get(season, (None, None))
+            if month is None:
+                return None
+            if "去年" in text:
+                year = ref.year - 1
+            else:
+                candidate = datetime(ref.year, month, day, tzinfo=ref.tzinfo)
+                year = ref.year if candidate <= ref else ref.year - 1
+            return datetime(year, month, day, tzinfo=ref.tzinfo)
+        return None
+
+    def _try_en_quarter(self, text: str, ref: datetime) -> datetime | None:
+        m = self._EN_QUARTER_RE.search(text)
+        if m:
+            quarter = int(m.group(1))
+            year = int(m.group(2))
+            month = (quarter - 1) * 3 + 1  # Q1→1, Q2→4, Q3→7, Q4→10
+            return datetime(year, month, 1, tzinfo=ref.tzinfo)
+        return None
+
+    def _try_zh_quarter(self, text: str, ref: datetime) -> datetime | None:
+        m = self._ZH_QUARTER_RE.search(text)
+        if m:
+            year = int(m.group(1))
+            q_str = m.group(2)
+            q_map = {"一": 1, "二": 2, "三": 3, "四": 4, "1": 1, "2": 2, "3": 3, "4": 4}
+            quarter = q_map.get(q_str)
+            if quarter:
+                month = (quarter - 1) * 3 + 1
+                return datetime(year, month, 1, tzinfo=ref.tzinfo)
         return None
 
     def _subtract_unit(
