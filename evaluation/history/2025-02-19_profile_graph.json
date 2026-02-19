@@ -1,0 +1,40 @@
+{
+  "test_id": "2025-02-19_profile_graph",
+  "date": "2025-02-19",
+  "name": "User Profile + Graph Entity Matching + Recall Limit 20",
+  "branch": "master",
+  "commit": "8605250b",
+  "judge_score": 0.704,
+  "improvement_vs_previous": 15.4,
+  "total_questions": 1534,
+  "overall": {
+    "f1": 0.437,
+    "bleu1": 0.382,
+    "judge": 0.704
+  },
+  "by_category": {
+    "1_multi_hop": { "count": 281, "f1": 0.359, "bleu1": 0.278, "judge": 0.737 },
+    "2_temporal": { "count": 317, "f1": 0.392, "bleu1": 0.335, "judge": 0.596 },
+    "3_open_domain": { "count": 96, "f1": 0.251, "bleu1": 0.208, "judge": 0.573 },
+    "4_single_hop": { "count": 840, "f1": 0.501, "bleu1": 0.455, "judge": 0.749 }
+  },
+  "changes": [
+    "Structured User Profile: 6 KV keys (identity, occupation, interests, values, relationships, personality) extracted during ingest, injected during recall",
+    "Recall Limit: 10 → 20, more context for answer generation",
+    "Graph Entity Matching: substring match against known graph_nodes, no LLM dependency, ~25ms overhead",
+    "Triple dedup: seen_triples set prevents duplicate graph facts"
+  ],
+  "timing": {
+    "ingest": "5289s (88min)",
+    "query": "5892s (98min, includes 402 retry)",
+    "evaluate": "2923s (48min)",
+    "total": "~234min (~3.9h)"
+  },
+  "infrastructure": {
+    "database": "PostgreSQL 18 (ParadeDB)",
+    "extensions": ["pgvector 0.8.1", "pg_search 0.21.8", "AGE 1.7.0"],
+    "embedding": "SiliconFlow BAAI/bge-m3",
+    "llm": "DeepSeek-chat",
+    "judge": "DeepSeek-chat"
+  }
+}

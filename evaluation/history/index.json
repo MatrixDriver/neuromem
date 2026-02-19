@@ -50,18 +50,29 @@
       "file": "2025-02-17_temporal_pgsearch.json",
       "analysis_file": "2025-02-17_temporal_pgsearch_analysis.md",
       "notes": "时间提取系统 + ParadeDB pg_search BM25，Judge 0.431 → 0.610 (+41.5%)，累计 +388%"
+    },
+    {
+      "test_id": "2025-02-19_profile_graph",
+      "date": "2025-02-19",
+      "name": "User Profile + Graph Entity Matching + Recall Limit 20",
+      "commit": "8605250b",
+      "branch": "master",
+      "judge_score": 0.704,
+      "improvement_vs_previous": 15.4,
+      "file": "2025-02-19_profile_graph.json",
+      "notes": "User Profile 提取注入 + Graph 实体匹配 + Recall Limit 20，Judge 0.610 → 0.704 (+15.4%)，累计 +463%"
     }
   ],
 
   "latest": {
-    "test_id": "2025-02-17_temporal_pgsearch",
-    "judge_score": 0.610
+    "test_id": "2025-02-19_profile_graph",
+    "judge_score": 0.704
   },
 
   "best": {
     "judge_score": {
-      "test_id": "2025-02-17_temporal_pgsearch",
-      "score": 0.610
+      "test_id": "2025-02-19_profile_graph",
+      "score": 0.704
     },
     "ingest_speed": {
       "test_id": "2025-02-16_perf_opt",
