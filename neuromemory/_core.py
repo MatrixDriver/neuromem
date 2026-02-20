@@ -714,37 +714,49 @@ class NeuroMemory:
             }
         """
         from neuromemory.services.search import SearchService, DEFAULT_DECAY_RATE
+        from neuromemory.services.temporal import TemporalExtractor
 
         # 🚀 Compute query embedding once, reuse for all searches
         query_embedding = await self._cached_embed(query)
 
-        # 1. Search extracted memories (existing)
+        # Extract time range from query for temporal filtering
+        temporal = TemporalExtractor()
+        event_after, event_before = temporal.extract_time_range(query)
+
+        # 1. Search extracted memories
         vector_results = []
         async with self._db.session() as session:
             svc = SearchService(session, self._embedding, self._db.pg_search_available)
-            vector_results = await svc.scored_search(
-                user_id, query, limit,
-                decay_rate=decay_rate or DEFAULT_DECAY_RATE,
-                query_embedding=query_embedding,
-            )
-
-            # 1b. For temporal queries ("when"/"how long"), boost episodic memories
-            # which have extracted_timestamps (74% coverage vs 0.6% for facts)
-            query_lower = query.lower().strip()
-            if query_lower.startswith(("when ", "how long ")):
+            if event_after or event_before:
+                # Temporal query detected: search episodic with time filter + fact without
                 episodic_results = await svc.scored_search(
                     user_id, query, limit,
                     decay_rate=decay_rate or DEFAULT_DECAY_RATE,
                     query_embedding=query_embedding,
                     memory_type="episodic",
+                    event_after=event_after,
+                    event_before=event_before,
                 )
-                # Merge: episodic results get priority, dedup by id
+                fact_results = await svc.scored_search(
+                    user_id, query, limit,
+                    decay_rate=decay_rate or DEFAULT_DECAY_RATE,
+                    query_embedding=query_embedding,
+                    exclude_types=["episodic"],
+                )
+                # Merge: episodic first (time-filtered), then facts, dedup by id
                 seen_ids = {r["id"] for r in episodic_results}
-                for r in vector_results:
+                merged_temporal = list(episodic_results)
+                for r in fact_results:
                     if r["id"] not in seen_ids:
                         seen_ids.add(r["id"])
-                        episodic_results.append(r)
-                vector_results = episodic_results[:limit]
+                        merged_temporal.append(r)
+                vector_results = merged_temporal[:limit]
+            else:
+                vector_results = await svc.scored_search(
+                    user_id, query, limit,
+                    decay_rate=decay_rate or DEFAULT_DECAY_RATE,
+                    query_embedding=query_embedding,
+                )
 
         # 2. Search original conversations (P1: mem0-style)
         conversation_results = await self._search_conversations(
@@ -821,12 +833,6 @@ class NeuroMemory:
                 if ts:
                     ts_str = ts.strftime("%Y-%m-%d") if hasattr(ts, "strftime") else str(ts)[:10]
                     prefix_parts.append(ts_str)
-                mtype = r.get("memory_type", "")
-                if mtype:
-                    prefix_parts.append(mtype)
-                imp = r.get("importance")
-                if imp is not None and imp >= 7:
-                    prefix_parts.append(f"importance={imp}")
                 meta = r.get("metadata") or {}
                 emotion = meta.get("emotion") if isinstance(meta, dict) else None
                 if emotion and isinstance(emotion, dict):
@@ -838,7 +844,7 @@ class NeuroMemory:
                         tone = "positive" if valence > 0.2 else "negative" if valence < -0.2 else "neutral"
                         prefix_parts.append(f"sentiment: {tone}")
                 if prefix_parts:
-                    entry["display_content"] = f"[{' | '.join(prefix_parts)}] {content}"
+                    entry["content"] = f"[{' | '.join(prefix_parts)}] {content}"
                 merged.append(entry)
 
         for r in conversation_results:

@@ -3,20 +3,17 @@
 LOCOMO_ANSWER_SYSTEM = """You answer questions about people based on their conversation memories.
 
 MEMORY FORMAT:
-Each memory has metadata in brackets: [date | type | importance | sentiment]
-- date: when this happened (YYYY-MM-DD)
-- type: "fact" (stable attribute), "episodic" (event/experience), "preference" (like/dislike)
-- importance: only shown for high-importance memories (>=7)
-- sentiment: emotional tone of the memory
+Some memories have metadata in brackets, e.g. [2023-06-15 | sentiment: excited] ...
+- The date (YYYY-MM-DD) indicates when this event happened.
+- The sentiment indicates the emotional tone of the memory.
 
 RULES:
 - Be concise: answer in a few words or a short phrase. No filler like "Based on the memories".
-- CRITICAL: Memories are separated by speaker. Only use {speaker_1}'s memories to answer about {speaker_1}, and {speaker_2}'s memories for {speaker_2}. Never mix up who a memory belongs to.
-- For "when" questions: use the [YYYY-MM-DD] date prefix from memories. Convert relative expressions ("yesterday", "last week", "next month") to specific dates using the memory's date prefix. Always answer with a specific date like "7 May 2023" or a time span like "4 years".
+- For "when" questions: use the date prefix from memories to give a specific date (e.g. "7 May 2023") or time span (e.g. "4 years").
 - For "what" questions asking for a list: include ALL items found in memories, comma-separated.
-- For "would/could/likely" questions: consider the person's personality, values, past experiences (especially negative ones), and stated preferences. Pay attention to sentiment — negative experiences suggest the person would avoid similar situations.
+- For "would/could/likely" questions: reason from what you know about the person's interests, values, and personality from the memories. Give your best inference with brief reasoning.
 - For "how many" questions: count carefully from distinct memory entries.
-- If memories conflict, use the most recent one (by date prefix).
+- If memories conflict, use the most recent one.
 
 Memories for {speaker_1}:
 {speaker_1_memories}
