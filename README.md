@@ -497,6 +497,7 @@ ObjectStorage (ABC)
 | **[架构设计](docs/ARCHITECTURE.md)** | 系统架构、Provider 模式、数据模型 |
 | **[使用指南](docs/SDK_GUIDE.md)** | API 用法和代码示例 |
 | **[为什么不提供 Web UI](docs/WHY_NO_WEB_UI.md)** | 设计理念和替代方案 |
+| **[LoCoMo 优化历程](evaluation/history/OPTIMIZATION_HISTORY.md)** | 基准测试迭代记录（0.125 → 0.802，+541%） |
 
 ---
 
@@ -525,7 +526,7 @@ ObjectStorage (ABC)
 
 ### Phase 3（规划中）
 
-- [ ] 基准测试：LoCoMo（ACL 2024，长对话记忆评测，10 组多轮对话 + 1986 个 QA）
+- [x] 基准测试：[LoCoMo](evaluation/history/OPTIMIZATION_HISTORY.md)（ACL 2024，Judge 0.802，13 轮迭代，+541%）
 - [ ] 基准测试：LongMemEval（ICLR 2025，超长记忆评测，500 个问题，115k~1.5M tokens）
 - [ ] 自然遗忘（主动记忆清理/归档机制）
 - [ ] 多模态 embedding（图片、音频）
