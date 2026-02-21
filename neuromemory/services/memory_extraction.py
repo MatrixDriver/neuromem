@@ -43,12 +43,11 @@ class MemoryExtractionService:
         """Extract memories from a list of conversation messages.
 
         Returns:
-            Statistics: {preferences_extracted, facts_extracted, episodes_extracted,
+            Statistics: {facts_extracted, episodes_extracted,
                         triples_extracted, messages_processed}
         """
         if not messages:
             return {
-                "preferences_extracted": 0,
                 "facts_extracted": 0,
                 "episodes_extracted": 0,
                 "triples_extracted": 0,
@@ -70,8 +69,7 @@ class MemoryExtractionService:
             })
 
         classified = await self._classify_messages(message_dicts, user_id)
-        logger.info(f"分类完成: {len(classified.get('preferences', []))} prefs, "
-                   f"{len(classified.get('facts', []))} facts, "
+        logger.info(f"分类完成: {len(classified.get('facts', []))} facts, "
                    f"{len(classified.get('episodes', []))} episodes, "
                    f"{len(classified.get('triples', []))} triples")
 
@@ -85,13 +83,6 @@ class MemoryExtractionService:
                     ref_time = ref_time.replace(tzinfo=timezone.utc)
             except ValueError:
                 ref_time = None
-
-        try:
-            prefs_count = await self._store_preferences(user_id, classified["preferences"])
-            logger.info(f"✅ 存储 preferences 成功: {prefs_count}")
-        except Exception as e:
-            logger.error(f"❌ 存储 preferences 失败: {e}", exc_info=True)
-            prefs_count = 0
 
         try:
             facts_count = await self._store_facts(user_id, classified["facts"], ref_time)
@@ -126,13 +117,13 @@ class MemoryExtractionService:
             except Exception as e:
                 logger.error(f"❌ 存储 profile_updates 失败: {e}", exc_info=True)
 
-        # 统一提交所有记忆（preferences, facts, episodes, triples）
+        # 统一提交所有记忆（facts, episodes, triples）
         # 保证原子性：要么全部成功，要么全部失败
-        total_count = prefs_count + facts_count + episodes_count + triples_count
+        total_count = facts_count + episodes_count + triples_count
         if total_count > 0:
             try:
                 await self.db.commit()
-                logger.info(f"✅ 所有记忆已提交 (prefs={prefs_count}, facts={facts_count}, "
+                logger.info(f"✅ 所有记忆已提交 (facts={facts_count}, "
                            f"episodes={episodes_count}, triples={triples_count})")
             except Exception as e:
                 logger.error(f"❌ 提交记忆失败，回滚所有更改: {e}", exc_info=True)
@@ -141,10 +132,9 @@ class MemoryExtractionService:
                 except Exception:
                     pass
                 # 提交失败，所有计数归零
-                prefs_count = facts_count = episodes_count = triples_count = 0
+                facts_count = episodes_count = triples_count = 0
 
         return {
-            "preferences_extracted": prefs_count,
             "facts_extracted": facts_count,
             "episodes_extracted": episodes_count,
             "triples_extracted": triples_count,
@@ -175,7 +165,7 @@ class MemoryExtractionService:
             return extracted
         except Exception as e:
             logger.error("Classification failed: %s", e, exc_info=True)
-            return {"preferences": [], "facts": [], "episodes": [], "triples": []}
+            return {"facts": [], "episodes": [], "triples": []}
 
     def _format_conversation(self, messages: list[dict]) -> str:
         lines = []
@@ -212,7 +202,7 @@ class MemoryExtractionService:
         """
         # Check KV preference
         kv_service = KVService(self.db)
-        lang_kv = await kv_service.get("preferences", user_id, "language")
+        lang_kv = await kv_service.get("profile", user_id, "language")
 
         if lang_kv and lang_kv.value in ["en", "zh"]:
             # If preference exists, check if language switched
@@ -224,13 +214,13 @@ class MemoryExtractionService:
                     logger.info(
                         f"Language preference updated: {user_id} {lang_kv.value} → {detected}"
                     )
-                    await kv_service.set("preferences", user_id, "language", detected)
+                    await kv_service.set("profile", user_id, "language", detected)
                     return detected
             return lang_kv.value
 
         # First time: auto-detect and save
         detected = self._detect_language(conversation_text)
-        await kv_service.set("preferences", user_id, "language", detected)
+        await kv_service.set("profile", user_id, "language", detected)
         return detected
 
     def _detect_language(self, text: str) -> str:
@@ -273,11 +263,11 @@ class MemoryExtractionService:
         """Build Chinese classification prompt (original)."""
         triples_section = ""
         triples_output = ""
-        profile_num = 5
+        profile_num = 4
         if self._graph_enabled:
-            profile_num = 6
+            profile_num = 5
             triples_section = """
-5. **Triples（实体关系三元组）**: 从 Facts 和 Episodes 中提取的结构化关系
+4. **Triples（实体关系三元组）**: 从 Facts 和 Episodes 中提取的结构化关系
    - 格式: {{"subject": "主体", "subject_type": "类型", "relation": "关系", "object": "客体", "object_type": "类型", "content": "原始描述", "confidence": 0.0-1.0}}
    - subject_type/object_type 可选: user, person, organization, location, event, skill, concept, entity
    - Facts 关系: works_at, lives_in, has_skill, studied_at, uses, knows
@@ -302,6 +292,7 @@ class MemoryExtractionService:
    - identity: 用户的姓名、年龄、性别等核心身份信息（字符串，如"张三，男，28岁"）
    - occupation: 用户的职业/公司/职位信息（字符串，如"Google 软件工程师"）
    - interests: 用户的兴趣爱好列表（字符串数组，如["摄影", "徒步"]）
+   - preferences: 用户的偏好和习惯（字符串数组，如["喜欢喝咖啡", "偏好深色模式"]）
    - values: 用户的价值观和信念（字符串数组，如["重视家庭", "环保意识强"]）
    - relationships: 用户的人际关系（字符串数组，如["妻子 Emily", "朋友 Tom"]）
    - personality: 用户的性格特征（字符串数组，如["外向", "乐观"]）"""
@@ -315,11 +306,7 @@ class MemoryExtractionService:
 {temporal_section}
 请提取以下记忆：
 
-1. **Preferences（偏好）**: 用户的喜好、习惯、设置
-   - 格式: {{"key": "偏好名称", "value": "偏好值", "confidence": 0.0-1.0}}
-   - key 应该用英文，value 可以是中文
-
-2. **Facts（事实）**: 用户及对话中提到的人物的客观信息
+1. **Facts（事实）**: 用户及对话中提到的人物的客观信息
    - 格式: {{"content": "事实描述", "category": "分类", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
    - category 可选: work, skill, hobby, personal, education, location, health, relationship, finance
    - importance: 对用户的重要程度（1=随口一提, 5=日常信息, 9=非常重要如生日/重大事件, 10=核心身份信息）
@@ -343,7 +330,7 @@ class MemoryExtractionService:
      * 性格特征："用户性格内向"
      * 因果关系："用户因为新工作搬到了纽约"
 
-3. **Episodes（情景）**: 事件、经历、时间相关信息
+2. **Episodes（情景）**: 事件、经历、时间相关信息
    - 格式: {{"content": "事件描述", "timestamp": "ISO日期或null", "timestamp_original": "原始时间表达或null", "people": ["人名1", "人名2"], "location": "地点或null", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
    - people: 事件中涉及的人物列表（不包括用户自己）
    - location: 事件发生的地点
@@ -352,7 +339,7 @@ class MemoryExtractionService:
    - entities: 同 Facts
    - content 必须使用明确的名称，禁止代词
 
-4. **注意事项**:
+3. **注意事项**:
    - importance: 根据内容对用户生活的重要程度打分
    - emotion: 尽量标注情感基调（包括隐含的情感），仅完全客观无情感的内容才设为 null
    - 全文代词消解：将所有代词还原为实际名称
@@ -367,11 +354,11 @@ class MemoryExtractionService:
 - confidence 表示提取的确信度 (0.0-1.0)
 - 如果某类没有信息，返回空列表
 - 必须返回有效的 JSON 格式，不要有其他文字说明
+- **语言要求**：所有 content/value 字段必须使用对话的语言（中文对话用中文，英文对话用英文）。禁止为同一信息同时生成中英文版本，禁止翻译对话内容为其他语言。每条信息只输出一次。
 
 返回格式（只返回 JSON，不要其他内容）：
 ```json
 {{
-  "preferences": [...],
   "facts": [...],
   "episodes": [...]{triples_output},
   "profile_updates": {{...}}
@@ -382,10 +369,10 @@ class MemoryExtractionService:
         """Build English classification prompt for English conversations."""
         triples_section = ""
         triples_output = ""
-        profile_num = 5
+        profile_num = 4
         if self._graph_enabled:
             triples_section = """
-5. **Triples (Entity-Relation Triples)**: Structured relationships extracted from Facts and Episodes
+4. **Triples (Entity-Relation Triples)**: Structured relationships extracted from Facts and Episodes
    - Format: {{"subject": "entity", "subject_type": "type", "relation": "relation", "object": "entity", "object_type": "type", "content": "original description", "confidence": 0.0-1.0}}
    - subject_type/object_type options: user, person, organization, location, event, skill, concept, entity
    - Facts relations: works_at, lives_in, has_skill, studied_at, uses, knows
@@ -393,7 +380,7 @@ class MemoryExtractionService:
    - For user's own: subject="user", subject_type="user"
    - Extract corresponding triple for each Fact and Episode when possible"""
             triples_output = ',\n  "triples": [...]'
-            profile_num = 6
+            profile_num = 5
 
         temporal_section = ""
         if session_timestamp:
@@ -411,6 +398,7 @@ class MemoryExtractionService:
    - identity: User's name, age, gender, and other core identity info (string, e.g. "John Smith, male, 28 years old")
    - occupation: User's job title, company, role (string, e.g. "Software engineer at Google")
    - interests: User's hobbies and interests (string array, e.g. ["photography", "hiking"])
+   - preferences: User's preferences and habits (string array, e.g. ["likes coffee", "prefers dark mode"])
    - values: User's values and beliefs (string array, e.g. ["values family", "environmentally conscious"])
    - relationships: User's interpersonal relationships (string array, e.g. ["wife Emily", "friend Tom"])
    - personality: User's personality traits (string array, e.g. ["extroverted", "optimistic"])"""
@@ -424,11 +412,7 @@ Conversation:
 {temporal_section}
 Extract the following memories:
 
-1. **Preferences**: User's likes, dislikes, habits, settings
-   - Format: {{"key": "preference_name", "value": "preference_value", "confidence": 0.0-1.0}}
-   - Key should be in English, value can be in any language
-
-2. **Facts**: Objective information about the user and people mentioned
+1. **Facts**: Objective information about the user and people mentioned
    - Format: {{"content": "fact description", "category": "category", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
    - Category options: work, skill, hobby, personal, education, location, health, relationship, finance
    - Importance: significance to user's life (1=casual mention, 5=daily info, 9=very important like birthday/major events, 10=core identity)
@@ -452,7 +436,7 @@ Extract the following memories:
      * Personality traits: "The user is introverted"
      * Causal relationships: "The user moved to NYC because of a new job"
 
-3. **Episodes**: Events, experiences, temporal information
+2. **Episodes**: Events, experiences, temporal information
    - Format: {{"content": "event description", "timestamp": "ISO date or null", "timestamp_original": "original time expression or null", "people": ["person1", "person2"], "location": "place or null", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
    - people: List of people involved in the event (excluding the user)
    - location: Where the event occurred
@@ -461,7 +445,7 @@ Extract the following memories:
    - entities: same as Facts
    - content MUST use explicit names, never pronouns
 
-4. **Guidelines**:
+3. **Guidelines**:
    - Importance: rate based on significance to user's life
    - Emotion: tag emotional tone including implicit sentiment. Only set null for purely objective content
    - Resolve ALL pronoun references to actual names throughout
@@ -476,11 +460,11 @@ Requirements:
 - Confidence represents extraction certainty (0.0-1.0)
 - Return empty list if no information for a category
 - Must return valid JSON format only, no additional text
+- **Language rule**: All content/value fields MUST use the same language as the conversation. Do NOT produce bilingual or translated duplicates. Each piece of information should appear exactly once, in the conversation's language.
 
 Return format (JSON only, no other content):
 ```json
 {{
-  "preferences": [...],
   "facts": [...],
   "episodes": [...]{triples_output},
   "profile_updates": {{...}}
@@ -506,13 +490,10 @@ Return format (JSON only, no other content):
             if not isinstance(result, dict):
                 raise ValueError("Result is not a dictionary")
 
-            preferences = result.get("preferences", [])
             facts = result.get("facts", [])
             episodes = result.get("episodes", [])
             triples = result.get("triples", [])
 
-            if not isinstance(preferences, list):
-                preferences = []
             if not isinstance(facts, list):
                 facts = []
             if not isinstance(episodes, list):
@@ -525,7 +506,6 @@ Return format (JSON only, no other content):
                 profile_updates = {}
 
             return {
-                "preferences": preferences,
                 "facts": facts,
                 "episodes": episodes,
                 "triples": triples,
@@ -534,36 +514,10 @@ Return format (JSON only, no other content):
 
         except json.JSONDecodeError as e:
             logger.error("Failed to parse JSON from classification result: %s", e)
-            return {"preferences": [], "facts": [], "episodes": [], "triples": [], "profile_updates": {}}
+            return {"facts": [], "episodes": [], "triples": [], "profile_updates": {}}
         except Exception as e:
             logger.error("Error parsing classification result: %s", e)
-            return {"preferences": [], "facts": [], "episodes": [], "triples": [], "profile_updates": {}}
-
-    async def _store_preferences(
-        self,
-        user_id: str,
-        preferences: list[dict],
-    ) -> int:
-        count = 0
-        kv_service = KVService(self.db)
-        for pref in preferences:
-            key = pref.get("key")
-            value = pref.get("value")
-            if not key or not value:
-                continue
-            try:
-                await kv_service.set(
-                    namespace="preferences",
-                    scope_id=user_id,
-                    key=key,
-                    value=value,
-                )
-                count += 1
-            except Exception as e:
-                logger.error("Failed to store preference %s: %s", key, e, exc_info=True)
-                # 不在这里 rollback，让异常向上传播或继续处理下一个
-                # 最终的 commit/rollback 由 extract_from_messages 统一处理
-        return count
+            return {"facts": [], "episodes": [], "triples": [], "profile_updates": {}}
 
     def _resolve_timestamp(
         self,
@@ -765,7 +719,7 @@ Return format (JSON only, no other content):
     # Keys that are overwritten each time (latest value wins)
     _PROFILE_OVERWRITE_KEYS = {"identity", "occupation"}
     # Keys that are append+dedup (accumulate over time)
-    _PROFILE_APPEND_KEYS = {"interests", "values", "relationships", "personality"}
+    _PROFILE_APPEND_KEYS = {"interests", "values", "relationships", "personality", "preferences"}
 
     async def _store_profile_updates(
         self,

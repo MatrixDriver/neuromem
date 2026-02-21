@@ -29,15 +29,15 @@ async def nm_with_llm(mock_embedding):
     """NeuroMemory instance with mock LLM for full-pipeline tests."""
     llm = MockLLMProvider(response="""```json
 {
-  "preferences": [
-    {"key": "language", "value": "Python", "confidence": 0.95}
-  ],
   "facts": [
     {"content": "在 Google 工作", "category": "work", "confidence": 0.98, "importance": 8},
     {"content": "住在北京", "category": "location", "confidence": 0.90, "importance": 5}
   ],
   "episodes": [],
-  "triples": []
+  "triples": [],
+  "profile_updates": {
+    "preferences": ["喜欢用 Python 编程"]
+  }
 }
 ```""")
     instance = NeuroMemory(
@@ -759,7 +759,6 @@ class TestRecallFullPipeline:
         result = await nm_with_llm.extract_memories(user_id, messages)
 
         assert result["facts_extracted"] == 2
-        assert result["preferences_extracted"] == 1
 
         # Step 3: Recall should find the extracted memories
         recall_result = await nm_with_llm.recall(user_id=user_id, query="Google 工作")
@@ -767,8 +766,8 @@ class TestRecallFullPipeline:
         assert any("Google" in c for c in contents)
 
     @pytest.mark.asyncio
-    async def test_extracted_preferences_stored_in_kv(self, nm_with_llm):
-        """Preferences extracted by LLM should be stored in KV and queryable."""
+    async def test_extracted_preferences_stored_in_profile(self, nm_with_llm):
+        """Preferences extracted by LLM should be stored in profile KV and queryable."""
         user_id = "pipeline_u2"
 
         await nm_with_llm.conversations.add_message(
@@ -778,10 +777,11 @@ class TestRecallFullPipeline:
         messages = await nm_with_llm.conversations.get_unextracted_messages(user_id)
         await nm_with_llm.extract_memories(user_id, messages)
 
-        # Preferences should be in KV store
-        pref = await nm_with_llm.kv.get(user_id, "preferences", "language")
+        # Preferences should be in profile KV store
+        pref = await nm_with_llm.kv.get(user_id, "profile", "preferences")
         assert pref is not None
-        assert pref.value == "Python"
+        assert isinstance(pref.value, list)
+        assert any("Python" in p for p in pref.value)
 
     @pytest.mark.asyncio
     async def test_pipeline_recall_has_importance_from_extraction(self, nm_with_llm):

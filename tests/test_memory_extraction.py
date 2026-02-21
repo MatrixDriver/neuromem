@@ -1,11 +1,8 @@
 """Tests for memory extraction with LLM classifier."""
 
 import pytest
-from unittest.mock import AsyncMock, patch
-
 from neuromemory.providers.llm import LLMProvider
 from neuromemory.services.conversation import ConversationService
-from neuromemory.services.graph import GraphService
 from neuromemory.services.memory_extraction import MemoryExtractionService
 from neuromemory.services.kv import KVService
 
@@ -41,15 +38,14 @@ async def test_extract_memories_from_conversations(db_session, mock_embedding):
     # Mock LLM response
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [
-    {"key": "favorite_color", "value": "蓝色", "confidence": 0.95},
-    {"key": "hobby", "value": "看科幻电影", "confidence": 0.90}
-  ],
   "facts": [
     {"content": "在 Google 工作", "category": "work", "confidence": 0.98},
     {"content": "主要做后端开发", "category": "skill", "confidence": 0.95}
   ],
-  "episodes": []
+  "episodes": [],
+  "profile_updates": {
+    "preferences": ["喜欢蓝色", "看科幻电影"]
+  }
 }
 ```""")
 
@@ -60,14 +56,14 @@ async def test_extract_memories_from_conversations(db_session, mock_embedding):
     )
 
     assert result["messages_processed"] == 4
-    assert result["preferences_extracted"] == 2
     assert result["facts_extracted"] == 2
     assert result["episodes_extracted"] == 0
 
-    # Verify preferences stored via KV
+    # Verify preferences stored in profile namespace
     kv_svc = KVService(db_session)
-    items = await kv_svc.list("preferences", "test_user")
-    assert len(items) >= 2
+    prefs = await kv_svc.get("profile", "test_user", "preferences")
+    assert prefs is not None
+    assert len(prefs.value) >= 2
 
 
 @pytest.mark.asyncio
@@ -81,7 +77,7 @@ async def test_extract_with_no_messages(db_session, mock_embedding):
     )
 
     assert result["messages_processed"] == 0
-    assert result["preferences_extracted"] == 0
+    assert result["facts_extracted"] == 0
 
 
 @pytest.mark.asyncio
@@ -94,19 +90,17 @@ async def test_parse_classification_result():
     result1 = svc._parse_classification_result("""
 ```json
 {
-  "preferences": [{"key": "color", "value": "blue", "confidence": 0.9}],
-  "facts": [],
+  "facts": [{"content": "test fact", "category": "work", "confidence": 0.9}],
   "episodes": []
 }
 ```
     """)
-    assert len(result1["preferences"]) == 1
-    assert result1["preferences"][0]["key"] == "color"
+    assert len(result1["facts"]) == 1
+    assert result1["facts"][0]["content"] == "test fact"
 
     # Without markdown
     result2 = svc._parse_classification_result("""
 {
-  "preferences": [],
   "facts": [{"content": "test", "category": "work", "confidence": 0.8}],
   "episodes": []
 }
@@ -115,7 +109,7 @@ async def test_parse_classification_result():
 
     # Invalid JSON
     result3 = svc._parse_classification_result("not json")
-    assert result3 == {"preferences": [], "facts": [], "episodes": [], "triples": [], "profile_updates": {}}
+    assert result3 == {"facts": [], "episodes": [], "triples": [], "profile_updates": {}}
 
 
 @pytest.mark.asyncio
@@ -133,7 +127,6 @@ async def test_extract_with_graph_triples(db_session, mock_embedding):
 
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [],
   "facts": [
     {"content": "在 Google 工作", "category": "work", "confidence": 0.98}
   ],
@@ -149,16 +142,13 @@ async def test_extract_with_graph_triples(db_session, mock_embedding):
 }
 ```""")
 
-    with patch.object(GraphService, "_execute_cypher", new_callable=AsyncMock) as mock_cypher:
-        mock_cypher.return_value = [{}]
-
-        extraction_svc = MemoryExtractionService(
-            db_session, mock_embedding, mock_llm, graph_enabled=True,
-        )
-        result = await extraction_svc.extract_from_messages(
-            user_id="test_user",
-            messages=messages,
-        )
+    extraction_svc = MemoryExtractionService(
+        db_session, mock_embedding, mock_llm, graph_enabled=True,
+    )
+    result = await extraction_svc.extract_from_messages(
+        user_id="test_user",
+        messages=messages,
+    )
 
     assert result["facts_extracted"] == 1
     assert result["triples_extracted"] == 2
@@ -179,7 +169,6 @@ async def test_extract_without_graph_ignores_triples(db_session, mock_embedding)
 
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [],
   "facts": [{"content": "在 Google 工作", "category": "work", "confidence": 0.98}],
   "episodes": [],
   "triples": [
@@ -209,7 +198,6 @@ async def test_parse_classification_with_triples():
 
     result = svc._parse_classification_result("""```json
 {
-  "preferences": [],
   "facts": [{"content": "在 Google 工作", "category": "work", "confidence": 0.98}],
   "episodes": [],
   "triples": [
@@ -240,7 +228,6 @@ async def test_extract_with_emotion_and_importance(db_session, mock_embedding):
 
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [],
   "facts": [
     {
       "content": "被公司裁员",
@@ -296,7 +283,6 @@ async def test_extract_without_emotion_backward_compatible(db_session, mock_embe
     # LLM response without emotion/importance (old format)
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [],
   "facts": [
     {"content": "喜欢编程", "category": "hobby", "confidence": 0.9}
   ],
@@ -330,7 +316,6 @@ async def test_language_detection_and_persistence(db_session, mock_embedding):
 
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [],
   "facts": [{"content": "Works at Google", "category": "work", "confidence": 0.95}],
   "episodes": []
 }
@@ -343,7 +328,7 @@ async def test_language_detection_and_persistence(db_session, mock_embedding):
     )
 
     # Verify language was saved as "en"
-    lang_kv = await kv_svc.get("preferences", "lang_user_en", "language")
+    lang_kv = await kv_svc.get("profile", "lang_user_en", "language")
     assert lang_kv is not None
     assert lang_kv.value == "en"
 
@@ -355,7 +340,7 @@ async def test_language_preference_reused(db_session, mock_embedding):
     conv_svc = ConversationService(db_session)
 
     # Manually set language preference to Chinese
-    await kv_svc.set("preferences", "lang_user_zh", "language", "zh")
+    await kv_svc.set("profile", "lang_user_zh", "language", "zh")
 
     # Add Chinese conversation (prefer zh stays zh)
     _, _ = await conv_svc.add_messages_batch(
@@ -394,7 +379,7 @@ async def test_language_switch_with_high_confidence(db_session, mock_embedding):
     conv_svc = ConversationService(db_session)
 
     # Set initial preference to zh
-    await kv_svc.set("preferences", "lang_switch_user", "language", "zh")
+    await kv_svc.set("profile", "lang_switch_user", "language", "zh")
 
     # Add pure English conversation (high confidence)
     _, _ = await conv_svc.add_messages_batch(
@@ -408,7 +393,6 @@ async def test_language_switch_with_high_confidence(db_session, mock_embedding):
 
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [],
   "facts": [{"content": "Prefers English", "category": "personal", "confidence": 0.9}],
   "episodes": []
 }
@@ -421,7 +405,7 @@ async def test_language_switch_with_high_confidence(db_session, mock_embedding):
     )
 
     # Verify language was updated to "en"
-    lang_kv = await kv_svc.get("preferences", "lang_switch_user", "language")
+    lang_kv = await kv_svc.get("profile", "lang_switch_user", "language")
     assert lang_kv.value == "en"
 
 
@@ -432,7 +416,7 @@ async def test_language_switch_low_confidence_no_update(db_session, mock_embeddi
     conv_svc = ConversationService(db_session)
 
     # Set initial preference to zh
-    await kv_svc.set("preferences", "lang_mixed_user", "language", "zh")
+    await kv_svc.set("profile", "lang_mixed_user", "language", "zh")
 
     # Add mixed-language conversation (low confidence)
     _, _ = await conv_svc.add_messages_batch(
@@ -446,7 +430,6 @@ async def test_language_switch_low_confidence_no_update(db_session, mock_embeddi
 
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [],
   "facts": [{"content": "喜欢 Python 和 AI", "category": "hobby", "confidence": 0.9}],
   "episodes": []
 }
@@ -459,7 +442,7 @@ async def test_language_switch_low_confidence_no_update(db_session, mock_embeddi
     )
 
     # Verify language stayed as "zh" (not enough confidence to switch)
-    lang_kv = await kv_svc.get("preferences", "lang_mixed_user", "language")
+    lang_kv = await kv_svc.get("profile", "lang_mixed_user", "language")
     assert lang_kv.value == "zh"
 
 
@@ -495,7 +478,6 @@ async def test_english_prompt_generation():
 
     # Should contain English instructions
     assert "Extract structured memory information" in prompt
-    assert "Preferences" in prompt
     assert "Facts" in prompt
     assert "Episodes" in prompt
     assert "JSON format" in prompt
@@ -515,7 +497,6 @@ async def test_chinese_prompt_generation():
 
     # Should contain Chinese instructions
     assert "分析以下对话" in prompt
-    assert "Preferences" in prompt or "偏好" in prompt
     assert "Facts" in prompt or "事实" in prompt
     assert "Episodes" in prompt or "情景" in prompt
 
@@ -535,7 +516,6 @@ async def test_auto_extract_on_add_message(mock_embedding):
         async def chat(self, messages, temperature=0.1, max_tokens=2048):
             return """```json
 {
-  "preferences": [{"key": "language", "value": "English", "confidence": 0.9}],
   "facts": [{"content": "Works at Google", "category": "work", "confidence": 0.95, "importance": 8}],
   "episodes": []
 }
@@ -624,7 +604,6 @@ async def test_auto_extract_batch_messages(db_session, mock_embedding):
         async def chat(self, messages, temperature=0.1, max_tokens=2048):
             return """```json
 {
-  "preferences": [],
   "facts": [
     {"content": "Works at Google", "category": "work", "confidence": 0.95},
     {"content": "Likes Python programming", "category": "hobby", "confidence": 0.9}

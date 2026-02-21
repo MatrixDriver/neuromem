@@ -7,11 +7,10 @@ are committed atomically in a single transaction, ensuring data consistency.
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from neuromemory.services.memory_extraction import MemoryExtractionService
 from neuromemory.services.conversation import ConversationService
-from neuromemory.services.graph import GraphService
 from neuromemory.providers.llm import LLMProvider
 
 
@@ -46,9 +45,6 @@ async def test_all_memory_types_committed_atomically(db_session, mock_embedding)
 
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [
-    {"key": "drink", "value": "咖啡"}
-  ],
   "facts": [
     {"content": "在 Google 工作", "category": "work", "confidence": 0.98}
   ],
@@ -59,63 +55,62 @@ async def test_all_memory_types_committed_atomically(db_session, mock_embedding)
     {"subject": "user", "subject_type": "user", "relation": "works_at",
      "object": "Google", "object_type": "organization",
      "content": "在 Google 工作", "confidence": 0.98}
-  ]
+  ],
+  "profile_updates": {
+    "preferences": ["喜欢喝咖啡"]
+  }
 }
 ```""")
 
-    with patch.object(GraphService, "_execute_cypher", new_callable=AsyncMock) as mock_cypher:
-        mock_cypher.return_value = [{}]
+    extraction_svc = MemoryExtractionService(
+        db_session, mock_embedding, mock_llm, graph_enabled=True,
+    )
 
-        extraction_svc = MemoryExtractionService(
-            db_session, mock_embedding, mock_llm, graph_enabled=True,
-        )
+    # Before calling extract, count existing records
+    from sqlalchemy import select, func
+    from neuromemory.models.kv import KeyValue
+    from neuromemory.models.memory import Embedding
+    from neuromemory.models.graph import GraphNode
 
-        # Before calling extract, count existing records
-        from sqlalchemy import select, func
-        from neuromemory.models.kv import KeyValue
-        from neuromemory.models.memory import Embedding
-        from neuromemory.models.graph import GraphNode
+    kv_before = await db_session.execute(select(func.count(KeyValue.id)))
+    emb_before = await db_session.execute(select(func.count(Embedding.id)))
+    node_before = await db_session.execute(select(func.count(GraphNode.id)))
 
-        kv_before = await db_session.execute(select(func.count(KeyValue.id)))
-        emb_before = await db_session.execute(select(func.count(Embedding.id)))
-        node_before = await db_session.execute(select(func.count(GraphNode.id)))
+    kv_count_before = kv_before.scalar()
+    emb_count_before = emb_before.scalar()
+    node_count_before = node_before.scalar()
 
-        kv_count_before = kv_before.scalar()
-        emb_count_before = emb_before.scalar()
-        node_count_before = node_before.scalar()
+    # Extract memories
+    result = await extraction_svc.extract_from_messages(
+        user_id=user_id,
+        messages=messages,
+    )
 
-        # Extract memories
-        result = await extraction_svc.extract_from_messages(
-            user_id=user_id,
-            messages=messages,
-        )
+    # Verify extraction counts
+    assert result["facts_extracted"] == 1
+    assert result["episodes_extracted"] == 1
+    assert result["triples_extracted"] == 1
 
-        # Verify extraction counts
-        assert result["preferences_extracted"] == 1
-        assert result["facts_extracted"] == 1
-        assert result["episodes_extracted"] == 1
-        assert result["triples_extracted"] == 1
+    # Verify all memory types were committed together
+    # Query specific to this user to avoid interference from other tests
+    kv_after = await db_session.execute(
+        select(func.count(KeyValue.id))
+        .where(KeyValue.scope_id == user_id)
+    )
+    emb_after = await db_session.execute(
+        select(func.count(Embedding.id))
+        .where(Embedding.user_id == user_id)
+    )
+    node_after = await db_session.execute(
+        select(func.count(GraphNode.id))
+        .where(GraphNode.user_id == user_id)
+    )
 
-        # Verify all memory types were committed together
-        # Query specific to this user to avoid interference from other tests
-        kv_after = await db_session.execute(
-            select(func.count(KeyValue.id))
-            .where(KeyValue.scope_id == user_id)
-        )
-        emb_after = await db_session.execute(
-            select(func.count(Embedding.id))
-            .where(Embedding.user_id == user_id)
-        )
-        node_after = await db_session.execute(
-            select(func.count(GraphNode.id))
-            .where(GraphNode.user_id == user_id)
-        )
-
-        # Note: extraction also auto-detects and stores language preference
-        # so we may have 2 preferences (drink + language) instead of just 1
-        assert kv_after.scalar() >= 1  # At least the "drink" preference
-        assert emb_after.scalar() == 2  # 1 fact + 1 episode
-        assert node_after.scalar() >= 2  # at least User + Google nodes
+    # Note: extraction also auto-detects and stores language preference in profile
+    # and preferences are now stored as profile_updates.preferences
+    assert kv_after.scalar() >= 1  # At least the language or preferences entry
+    assert emb_after.scalar() == 2  # 1 fact + 1 episode
+    assert node_after.scalar() >= 2  # at least User + Google nodes
 
 
 @pytest.mark.asyncio
@@ -136,12 +131,9 @@ async def test_rollback_on_failure_prevents_partial_commit(db_session, mock_embe
     )
     messages = await conv_svc.get_unextracted_messages(user_id=user_id)
 
-    # Mock LLM that returns invalid data to trigger an error
+    # Mock LLM that returns data to trigger an error
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [
-    {"key": "test", "value": "value"}
-  ],
   "facts": [
     {"content": "测试 fact", "category": "test", "confidence": 0.9}
   ],
@@ -162,45 +154,41 @@ async def test_rollback_on_failure_prevents_partial_commit(db_session, mock_embe
 
     mock_embedding.embed = failing_embed
 
-    with patch.object(GraphService, "_execute_cypher", new_callable=AsyncMock) as mock_cypher:
-        mock_cypher.return_value = [{}]
+    extraction_svc = MemoryExtractionService(
+        db_session, mock_embedding, mock_llm, graph_enabled=False,
+    )
 
-        extraction_svc = MemoryExtractionService(
-            db_session, mock_embedding, mock_llm, graph_enabled=False,
-        )
+    # Count before
+    from sqlalchemy import select, func
+    from neuromemory.models.kv import KeyValue
+    from neuromemory.models.memory import Embedding
 
-        # Count before
-        from sqlalchemy import select, func
-        from neuromemory.models.kv import KeyValue
-        from neuromemory.models.memory import Embedding
+    kv_before = await db_session.execute(select(func.count(KeyValue.id)))
+    emb_before = await db_session.execute(select(func.count(Embedding.id)))
 
-        kv_before = await db_session.execute(select(func.count(KeyValue.id)))
-        emb_before = await db_session.execute(select(func.count(Embedding.id)))
+    kv_count_before = kv_before.scalar()
+    emb_count_before = emb_before.scalar()
 
-        kv_count_before = kv_before.scalar()
-        emb_count_before = emb_before.scalar()
+    # Extract should partially fail but handle gracefully
+    result = await extraction_svc.extract_from_messages(
+        user_id=user_id,
+        messages=messages,
+    )
 
-        # Extract should partially fail but handle gracefully
-        result = await extraction_svc.extract_from_messages(
-            user_id=user_id,
-            messages=messages,
-        )
+    # Note: Currently our implementation catches exceptions within each storage loop,
+    # so partial success is possible (some facts succeed before failure).
+    # The atomic commit at the end commits whatever succeeded.
+    # Facts may partially succeed (depending on which one failed)
+    # This is expected behavior with current error handling
 
-        # Note: Currently our implementation catches exceptions within each storage loop,
-        # so partial success is possible (some facts succeed before failure).
-        # The atomic commit at the end commits whatever succeeded.
-        assert result["preferences_extracted"] == 1
-        # Facts may partially succeed (depending on which one failed)
-        # This is expected behavior with current error handling
-
-        # Verify that transaction didn't completely fail
-        # (at least preferences should be committed)
-        # Note: may include auto-detected language preference
-        kv_after = await db_session.execute(
-            select(func.count(KeyValue.id))
-            .where(KeyValue.scope_id == user_id)
-        )
-        assert kv_after.scalar() >= 1  # At least 1 preference was committed
+    # Verify that transaction handled gracefully
+    # Note: language detection stores to profile KV
+    kv_after = await db_session.execute(
+        select(func.count(KeyValue.id))
+        .where(KeyValue.scope_id == user_id)
+    )
+    # Language preference is stored in profile namespace
+    assert kv_after.scalar() >= 1  # At least language preference was committed
 
 
 @pytest.mark.asyncio
@@ -221,7 +209,6 @@ async def test_no_intermediate_commits_during_extraction(db_session, mock_embedd
 
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [],
   "facts": [
     {"content": "fact 1", "category": "test", "confidence": 0.9},
     {"content": "fact 2", "category": "test", "confidence": 0.9}
@@ -233,33 +220,30 @@ async def test_no_intermediate_commits_during_extraction(db_session, mock_embedd
 }
 ```""")
 
-    with patch.object(GraphService, "_execute_cypher", new_callable=AsyncMock) as mock_cypher:
-        mock_cypher.return_value = [{}]
+    extraction_svc = MemoryExtractionService(
+        db_session, mock_embedding, mock_llm, graph_enabled=False,
+    )
 
-        extraction_svc = MemoryExtractionService(
-            db_session, mock_embedding, mock_llm, graph_enabled=False,
-        )
+    # Track commit calls
+    original_commit = db_session.commit
+    commit_count = 0
 
-        # Track commit calls
-        original_commit = db_session.commit
-        commit_count = 0
+    async def counting_commit():
+        nonlocal commit_count
+        commit_count += 1
+        await original_commit()
 
-        async def counting_commit():
-            nonlocal commit_count
-            commit_count += 1
-            await original_commit()
+    db_session.commit = counting_commit
 
-        db_session.commit = counting_commit
+    # Extract memories
+    result = await extraction_svc.extract_from_messages(
+        user_id="commit_test_user",
+        messages=messages,
+    )
 
-        # Extract memories
-        result = await extraction_svc.extract_from_messages(
-            user_id="commit_test_user",
-            messages=messages,
-        )
-
-        # Verify: should have exactly 1 commit (at the end)
-        # Not 2 commits (one for facts, one for episodes)
-        assert commit_count == 1, "Should have exactly 1 commit, not multiple intermediate commits"
+    # Verify: should have exactly 1 commit (at the end)
+    # Not 2 commits (one for facts, one for episodes)
+    assert commit_count == 1, "Should have exactly 1 commit, not multiple intermediate commits"
 
 
 @pytest.mark.asyncio
@@ -280,7 +264,6 @@ async def test_graph_triples_committed_with_other_memories(db_session, mock_embe
 
     mock_llm = MockLLMProvider(response="""```json
 {
-  "preferences": [],
   "facts": [
     {"content": "在 Google 工作", "category": "work", "confidence": 0.98}
   ],
@@ -293,41 +276,34 @@ async def test_graph_triples_committed_with_other_memories(db_session, mock_embe
 }
 ```""")
 
-    with patch.object(GraphService, "_execute_cypher", new_callable=AsyncMock) as mock_cypher:
-        mock_cypher.return_value = [{}]
+    extraction_svc = MemoryExtractionService(
+        db_session, mock_embedding, mock_llm, graph_enabled=True,
+    )
 
-        extraction_svc = MemoryExtractionService(
-            db_session, mock_embedding, mock_llm, graph_enabled=True,
-        )
+    # Extract
+    result = await extraction_svc.extract_from_messages(
+        user_id="graph_atomic_user",
+        messages=messages,
+    )
 
-        # Extract
-        result = await extraction_svc.extract_from_messages(
-            user_id="graph_atomic_user",
-            messages=messages,
-        )
+    # Both facts and triples should be extracted
+    assert result["facts_extracted"] == 1
+    assert result["triples_extracted"] == 1
 
-        # Both facts and triples should be extracted
-        assert result["facts_extracted"] == 1
-        # Note: triples may still fail due to the unresolved transaction abort issue,
-        # but the test verifies that we attempt to store them in the same transaction
-        # assert result["triples_extracted"] == 1
+    # Verify both are in database
+    from sqlalchemy import select, func
+    from neuromemory.models.memory import Embedding
+    from neuromemory.models.graph import GraphNode
 
-        # Verify both are in database (or both are not, if commit failed)
-        from sqlalchemy import select, func
-        from neuromemory.models.memory import Embedding
-        from neuromemory.models.graph import GraphNode
+    fact_count = await db_session.execute(
+        select(func.count(Embedding.id))
+        .where(Embedding.user_id == "graph_atomic_user")
+        .where(Embedding.memory_type == "fact")
+    )
+    node_count = await db_session.execute(
+        select(func.count(GraphNode.id))
+        .where(GraphNode.user_id == "graph_atomic_user")
+    )
 
-        fact_count = await db_session.execute(
-            select(func.count(Embedding.id))
-            .where(Embedding.user_id == "graph_atomic_user")
-            .where(Embedding.memory_type == "fact")
-        )
-        # node_count = await db_session.execute(
-        #     select(func.count(GraphNode.id))
-        #     .where(GraphNode.user_id == "graph_atomic_user")
-        # )
-
-        # If facts were committed, nodes should also be committed
-        # (or both should fail together)
-        assert fact_count.scalar() >= 0
-        # assert node_count.scalar() >= 0
+    assert fact_count.scalar() >= 1
+    assert node_count.scalar() >= 2  # User + Google nodes

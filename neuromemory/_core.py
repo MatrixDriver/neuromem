@@ -20,7 +20,7 @@ class ExtractionStrategy:
     """Memory extraction trigger strategy.
 
     Controls when NeuroMemory automatically extracts structured memories
-    (preferences, facts, episodes) from conversation messages using LLM.
+    (facts, episodes) from conversation messages using LLM.
 
     Inspired by AWS Bedrock AgentCore trigger conditions.
 
@@ -241,7 +241,6 @@ class ConversationsFacade:
 
         logger.info(
             f"Auto-extracted {result['facts_extracted']} facts, "
-            f"{result['preferences_extracted']} preferences, "
             f"{result['episodes_extracted']} episodes from batch for {user_id}"
         )
 
@@ -361,13 +360,6 @@ class GraphFacade:
         async with self._db.session() as session:
             svc = GraphService(session)
             return await svc.find_path(source_type, source_id, target_type, target_id, max_depth, user_id)
-
-    async def query(self, cypher: str, params: dict | None = None):
-        """Execute raw Cypher query. WARNING: bypasses user isolation."""
-        from neuromemory.services.graph import GraphService
-        async with self._db.session() as session:
-            svc = GraphService(session)
-            return await svc.query(cypher, params)
 
 
 class NeuroMemory:
@@ -592,9 +584,8 @@ class NeuroMemory:
             stats = await self.extract_memories(user_id, messages)
             logger.info(
                 "Auto-extracted memories: user=%s session=%s "
-                "prefs=%d facts=%d episodes=%d msgs=%d",
+                "facts=%d episodes=%d msgs=%d",
                 user_id, session_id,
-                stats["preferences_extracted"],
                 stats["facts_extracted"],
                 stats["episodes_extracted"],
                 stats["messages_processed"],
@@ -810,7 +801,7 @@ class NeuroMemory:
             from neuromemory.services.kv import KVService
             async with self._db.session() as session:
                 kv_svc = KVService(session)
-                profile_keys = ["identity", "occupation", "interests", "values", "relationships", "personality"]
+                profile_keys = ["identity", "occupation", "interests", "preferences", "values", "relationships", "personality"]
                 for key in profile_keys:
                     kv = await kv_svc.get("profile", user_id, key)
                     if kv and kv.value:
