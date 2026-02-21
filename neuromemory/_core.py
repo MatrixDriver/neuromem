@@ -105,6 +105,7 @@ class ConversationsFacade:
         _embedding: EmbeddingProvider | None = None,
         _llm: LLMProvider | None = None,
         _graph_enabled: bool = False,
+        _on_extraction_done=None,
     ):
         self._db = db
         self._on_message_added = _on_message_added
@@ -113,6 +114,7 @@ class ConversationsFacade:
         self._embedding = _embedding
         self._llm = _llm
         self._graph_enabled = _graph_enabled
+        self._on_extraction_done = _on_extraction_done
 
     async def add_message(self, user_id: str, role: str, content: str, session_id: str | None = None, metadata: dict | None = None):
         from neuromemory.services.conversation import ConversationService
@@ -214,6 +216,8 @@ class ConversationsFacade:
         """
         try:
             await self._extract_single_message(user_id, session_id, messages)
+            if self._on_extraction_done:
+                await self._on_extraction_done(user_id)
         except Exception as e:
             # 在测试环境中，session 可能已经关闭，这是正常的
             from sqlalchemy.exc import IllegalStateChangeError
@@ -244,6 +248,8 @@ class ConversationsFacade:
             f"Auto-extracted {result['facts_extracted']} facts, "
             f"{result['episodes_extracted']} episodes from batch for {user_id}"
         )
+        if self._on_extraction_done:
+            await self._on_extraction_done(user_id)
 
     async def close_session(self, user_id: str, session_id: str) -> None:
         """Close a conversation session, triggering memory extraction if configured."""
@@ -376,6 +382,9 @@ class NeuroMemory:
         graph_enabled: Enable graph memory storage
         pool_size: Database connection pool size
         echo: Enable SQLAlchemy SQL logging
+        reflection_interval: In auto_extract mode, trigger background reflect every N extractions
+            (0 = disabled). Requires llm. E.g. reflection_interval=10 runs reflect after every
+            10 messages. reflect() runs fully in the background and never blocks add_message.
 
     Usage:
         # Auto-extract mode (default, like mem0)
@@ -416,6 +425,7 @@ class NeuroMemory:
         graph_enabled: bool = False,
         pool_size: int = 10,
         echo: bool = False,
+        reflection_interval: int = 0,
     ):
         # Set embedding dimensions before any model import
         import neuromemory.models as _models
@@ -428,6 +438,7 @@ class NeuroMemory:
         self._extraction = extraction
         self._auto_extract = auto_extract
         self._graph_enabled = graph_enabled
+        self._reflection_interval = reflection_interval
 
         # Extraction state tracking
         self._msg_counts: dict[tuple[str, str], int] = {}
@@ -444,6 +455,13 @@ class NeuroMemory:
         on_msg = self._on_message_added if _has_extraction else None
         on_close = self._on_session_closed if _has_extraction else None
 
+        # Background reflect callback for auto_extract mode
+        _auto_reflect = (
+            self._on_auto_extraction_done
+            if auto_extract and llm and reflection_interval > 0
+            else None
+        )
+
         # Sub-module facades
         self.kv = KVFacade(self._db)
         self.conversations = ConversationsFacade(
@@ -454,6 +472,7 @@ class NeuroMemory:
             _embedding=embedding,
             _llm=llm,
             _graph_enabled=graph_enabled,
+            _on_extraction_done=_auto_reflect,
         )
         self.graph = GraphFacade(self._db)
 
@@ -572,6 +591,18 @@ class NeuroMemory:
             await self._do_extraction(user_id, session_id)
         except asyncio.CancelledError:
             pass
+
+    async def _on_auto_extraction_done(self, user_id: str) -> None:
+        """Callback invoked after auto-extract completes a single message.
+
+        Tracks per-user extraction count and triggers background reflect
+        every ``reflection_interval`` extractions.
+        """
+        self._extraction_counts[user_id] = self._extraction_counts.get(user_id, 0) + 1
+        if self._extraction_counts[user_id] >= self._reflection_interval:
+            self._extraction_counts[user_id] = 0
+            logger.info("Auto-reflect triggered for user=%s (interval=%d)", user_id, self._reflection_interval)
+            await self.reflect(user_id, background=True)
 
     async def _do_extraction(self, user_id: str, session_id: str) -> None:
         """Extract memories from unprocessed messages in a session."""

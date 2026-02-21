@@ -154,6 +154,7 @@ agent 需要上下文 → 召回记忆 (recall)
 
 **配置选项**：
 - **自动模式**（默认，推荐）：`auto_extract=True`，每次 `add_message` 都提取记忆
+- **自动模式 + 后台 reflect**：`auto_extract=True, reflection_interval=10`，每 10 次提取后自动后台 reflect，无阻塞
 - **手动模式**：`auto_extract=False`，手动调用 `extract_memories()`
 - **策略模式**：`auto_extract=False` + `ExtractionStrategy(message_interval=10)`，每 10 条消息触发
 
@@ -302,15 +303,33 @@ result = await nm.reflect(user_id="alice")
 # 由 ExtractionStrategy 自动调用，用于高频轻量的增量提取
 ```
 
-### 策略配置（ExtractionStrategy）
+### 后台 reflect 自动配置（推荐）
 
-通过 `ExtractionStrategy` 控制自动记忆管理，配置后 `add_message()` 会在满足条件时自动触发提取：
+`auto_extract=True` 模式下，通过 `reflection_interval` 参数让 reflect 完全自动化，不阻塞任何对话流程：
+
+```python
+nm = NeuroMemory(
+    ...,
+    auto_extract=True,           # 每条消息自动提取记忆（默认）
+    reflection_interval=10,      # 每 10 次提取后，后台自动 reflect()（0 = 禁用）
+    llm=OpenAILLM(api_key="..."),
+)
+```
+
+- `reflection_interval=10`：用户每说 10 句话，后台自动运行一次 reflect，生成洞察
+- reflect 使用 `asyncio.create_task()`，**完全不阻塞** `add_message()` 的响应
+- reflect 生成的 `insight` 自动进入 recall() 的向量检索，下次对话立即可用
+
+### 策略配置（ExtractionStrategy，高级用法）
+
+需要按会话/闲置时间触发时使用：
 
 ```python
 from neuromemory import ExtractionStrategy
 
 nm = NeuroMemory(
     ...,
+    auto_extract=False,
     extraction=ExtractionStrategy(
         message_interval=10,      # 每 10 条消息自动提取记忆（0 = 禁用）
         idle_timeout=600,         # 闲置 10 分钟后自动提取（0 = 禁用）
@@ -322,20 +341,109 @@ nm = NeuroMemory(
 ```
 
 **推荐配置**：
-- **实时应用**（聊天机器人）：`message_interval=10, reflection_interval=50`
-- **批处理**（每日总结）：`message_interval=0, on_session_close=True`，手动调用 `reflect()`
-- **开发调试**：全部设为 0，手动控制提取和反思时机
+- **实时对话**（推荐）：`auto_extract=True, reflection_interval=10`，最简单
+- **精细控制**：`ExtractionStrategy(message_interval=10, reflection_interval=50)`
+- **批处理**（每日总结）：`auto_extract=False, on_session_close=True`，手动调用 `reflect()`
 
 ---
 
-## 完整 Agent 示例
+## 如何用 recall() 组装 Prompt（最佳实践）
 
-> 可运行的完整示例见 **[example/](example/)**，支持终端交互、命令查询、自动记忆提取。无需 Embedding API Key。
+> 可运行的完整示例见 **[example/](example/)**，支持终端交互、命令查询、自动记忆提取。
 
-以下是一个带记忆的聊天 agent 核心实现：
+这是使用 NeuroMemory 最关键的一步——**如何把 recall() 的结果变成高质量的 LLM 上下文**。正确组装 prompt 能充分利用 NeuroMemory 的全部能力：三因子检索、图谱关系、用户画像、情感洞察。
+
+### recall() 返回的完整结构
 
 ```python
-from neuromemory import NeuroMemory, SiliconFlowEmbedding, OpenAILLM, ExtractionStrategy
+result = await nm.recall(user_id="alice", query=user_input, limit=10)
+
+# result 包含以下字段：
+result["merged"]               # ⭐ 主要使用：vector + conversation 去重合并，已按评分排序
+result["user_profile"]         # ⭐ 用户画像：occupation, interests, identity 等
+result["graph_context"]        # ⭐ 图谱三元组文本：["alice → WORKS_AT → google", ...]
+result["vector_results"]       # 提取的记忆（fact/episodic/insight），含评分
+result["conversation_results"] # 原始对话片段，保留了日期细节
+result["graph_results"]        # 图谱原始三元组
+```
+
+**merged 中每条记忆的关键字段**：
+```python
+{
+    "content": "[2025-03-01 | sentiment: positive] 在 Google 工作",
+    "source": "vector",          # "vector" 或 "conversation"
+    "memory_type": "fact",       # fact / episodic / insight
+    "score": 0.646,              # 综合评分（recall 三因子）
+    "metadata": {
+        "importance": 8,         # 重要性 (1-10)
+        "emotion": {"label": "满足", "valence": 0.6}
+    }
+}
+```
+
+### 推荐的 Prompt 组装模板
+
+```python
+def build_system_prompt(recall_result: dict, user_input: str) -> str:
+    """将 recall() 结果组装为 LLM system prompt。"""
+
+    # 1. 用户画像 → 稳定背景信息，始终放在 system prompt 中
+    profile = recall_result.get("user_profile", {})
+    profile_lines = []
+    if profile.get("identity"):
+        profile_lines.append(f"身份：{profile['identity']}")
+    if profile.get("occupation"):
+        profile_lines.append(f"职业：{profile['occupation']}")
+    if profile.get("interests"):
+        profile_lines.append(f"兴趣：{profile['interests']}")
+    profile_text = "\n".join(profile_lines) if profile_lines else "暂无"
+
+    # 2. merged 按类型分层，提取最相关的记忆
+    merged = recall_result.get("merged", [])
+    facts     = [m for m in merged if m.get("memory_type") == "fact"][:3]
+    episodes  = [m for m in merged if m.get("memory_type") == "episodic"][:2]
+    insights  = [m for m in merged if m.get("memory_type") == "insight"][:2]
+    # 其余高分记忆（对话片段等）
+    others    = [m for m in merged
+                 if m.get("memory_type") not in ("fact", "episodic", "insight")][:2]
+
+    def fmt(items):
+        return "\n".join(f"- {m['content']}" for m in items) or "暂无"
+
+    # 3. 图谱关系 → 结构化事实，补充向量检索的盲区
+    graph_lines = recall_result.get("graph_context", [])[:5]
+    graph_text = "\n".join(f"- {g}" for g in graph_lines) or "暂无"
+
+    return f"""你是一个有长期记忆的 AI 助手，能根据对用户的了解提供个性化回复。
+
+## 用户画像
+{profile_text}
+
+## 关于当前话题，你记得的事实
+{fmt(facts)}
+
+## 相关经历和情景
+{fmt(episodes)}
+
+## 对用户的深层理解（洞察）
+{fmt(insights)}
+
+## 结构化关系
+{graph_text}
+
+## 其他相关记忆
+{fmt(others)}
+
+---
+请根据以上记忆自然地回应用户，不要逐条引用记忆，而是像一个真正了解他的朋友那样对话。
+如果记忆与当前问题不相关，忽略它们即可。"""
+```
+
+### 完整 Agent 实现
+
+```python
+import asyncio
+from neuromemory import NeuroMemory, SiliconFlowEmbedding, OpenAILLM
 from openai import AsyncOpenAI
 
 class MemoryAgent:
@@ -344,100 +452,65 @@ class MemoryAgent:
         self.llm = openai_client
 
     async def chat(self, user_id: str, user_input: str) -> str:
-        """处理用户输入，返回 agent 回复"""
-
-        # === 步骤 1：存储用户消息（自动提取记忆）===
+        # 1. 存储用户消息（后台自动提取记忆，不阻塞）
         await self.nm.conversations.add_message(
-            user_id=user_id,
-            role="user",
-            content=user_input
+            user_id=user_id, role="user", content=user_input
         )
-        # → 如果启用 auto_extract，记忆已自动提取
 
-        # === 步骤 2：召回相关记忆 ===
-        recall_result = await self.nm.recall(user_id=user_id, query=user_input, limit=5)
-        memories = recall_result["merged"]
+        # 2. 召回相关记忆（一次 recall 获取所有上下文）
+        recall_result = await self.nm.recall(user_id=user_id, query=user_input, limit=10)
 
-        # 获取用户偏好（从 profile 中）
-        lang_kv = await self.nm.kv.get(user_id, "profile", "language")
-        language = lang_kv.value if lang_kv else "zh-CN"
+        # 3. 组装 system prompt
+        system_prompt = build_system_prompt(recall_result, user_input)
 
-        # 获取近期洞察
-        insights = await self.nm.search(user_id, user_input, memory_type="insight", limit=3)
-
-        # === 步骤 3：构建包含记忆的 prompt ===
-        memory_context = "\n".join([
-            f"- {m['content']} (重要性: {m.get('metadata', {}).get('importance', 5)})"
-            for m in memories[:3]
-        ]) if memories else "暂无相关记忆"
-
-        insight_context = "\n".join([
-            f"- {i['content']}" for i in insights
-        ]) if insights else "暂无深度理解"
-
-        system_prompt = f"""你是一个有记忆的 AI 助手。请用 {language} 语言回复。
-
-        **关于用户的具体记忆**：
-        {memory_context}
-
-        **对用户的深度理解（洞察）**：
-        {insight_context}
-
-        请根据这些记忆和理解，以朋友的口吻自然地回应用户。"""
-
-        # === 步骤 4：调用 LLM 生成回复 ===
+        # 4. 调用 LLM
         response = await self.llm.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_input}
+                {"role": "user", "content": user_input},
             ]
         )
-        assistant_reply = response.choices[0].message.content
+        reply = response.choices[0].message.content
 
-        # === 步骤 5：存储 assistant 回复 ===
+        # 5. 存储 assistant 回复
         await self.nm.conversations.add_message(
-            user_id=user_id,
-            role="assistant",
-            content=assistant_reply
+            user_id=user_id, role="assistant", content=reply
         )
+        return reply
 
-        return assistant_reply
 
-
-# 使用示例
 async def main():
     async with NeuroMemory(
-        database_url="postgresql+asyncpg://...",
+        database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
         embedding=SiliconFlowEmbedding(api_key="..."),
         llm=OpenAILLM(api_key="..."),
-        auto_extract=True,  # 默认启用，每次 add_message 都提取记忆（推荐）
+        auto_extract=True,        # 每条消息自动提取记忆
+        reflection_interval=10,   # 每 10 次提取后后台自动 reflect，生成洞察
     ) as nm:
         agent = MemoryAgent(nm, AsyncOpenAI(api_key="..."))
 
-        # 第一轮对话
-        reply1 = await agent.chat("alice", "我在 Google 工作，做后端开发，最近压力有点大")
-        print(f"Agent: {reply1}")
+        reply = await agent.chat("alice", "我在 Google 工作，做后端开发，最近压力很大")
+        print(f"Agent: {reply}")
+        # → 自动提取：fact "在 Google 工作"，episodic "最近压力很大"
+        # → 图谱关系：(alice)-[WORKS_AT]->(google)
 
-        # → add_message 自动提取记忆：
-        #   fact: "在 Google 工作", episodic: "最近压力有点大"
-        #   relation: (alice)-[works_at]->(Google)
-
-        # 第二轮对话（几天后）— agent 能"记住"之前的对话
-        reply2 = await agent.chat("alice", "有什么减压的建议吗？")
-        print(f"Agent: {reply2}")
-
-        # 定期生成洞察（可选，如每天晚上或每 100 条消息）
-        result = await nm.reflect(user_id="alice")
-        print(f"生成了 {result['insights_generated']} 条洞察")
+        reply = await agent.chat("alice", "有什么减压的建议吗？")
+        print(f"Agent: {reply}")
+        # → recall 返回"最近压力很大"的情景记忆和画像，agent 给出个性化建议
 ```
 
-**关键点**：
-1. **实时提取**：`auto_extract=True` 让每次 `add_message` 都立即提取记忆（像 mem0）
-2. **召回记忆**：每次对话前用 `recall()` 找出相关记忆
-3. **注入 prompt**：将记忆作为 context 注入到 LLM 的 system prompt
-4. **生成洞察**：定期调用 `reflect()` 提炼高层洞察和更新情感画像
-5. **持续学习**：agent 随着对话增加，对用户的理解越来越深入
+### 组装 Prompt 的核心原则
+
+| 原则 | 说明 |
+|------|------|
+| **一次 recall，完整上下文** | 一次 `recall()` 已包含 merged、profile、graph，无需额外查询 |
+| **profile 放 system prompt** | 职业、兴趣等稳定画像每次都要注入，是 agent 个性化的基础 |
+| **merged 按类型分层** | fact（事实）→ episodic（经历）→ insight（洞察）→ 其他，优先级递减 |
+| **graph_context 补充结构化知识** | 向量检索可能遗漏"alice 在 Google 工作"这类关系，图谱能补充 |
+| **insight 无需单独 search** | `reflection_interval` 开启后，insight 自动进入 merged，无需额外调用 |
+| **token 预算控制** | 每类记忆取 2-3 条，总记忆上下文建议 300-500 tokens |
+| **自然注入，不逐条引用** | system prompt 结尾提示 LLM"像朋友一样对话"，避免机械引用 |
 
 ---
 
@@ -542,6 +615,7 @@ ObjectStorage (ABC)
 - [x] 访问追踪（access_count / last_accessed_at）
 - [x] 反思机制（从记忆中生成高层洞察）
 - [x] 后台任务系统（ExtractionStrategy 自动触发）
+- [x] auto_extract 模式后台自动 reflect（`reflection_interval` 参数）
 
 ### Phase 3（规划中）
 

@@ -46,6 +46,7 @@ nm = NeuroMemory(
     graph_enabled: bool = False,
     pool_size: int = 10,
     echo: bool = False,
+    reflection_interval: int = 0,
 )
 ```
 
@@ -57,8 +58,9 @@ nm = NeuroMemory(
 | `embedding` | `EmbeddingProvider` | ✅ | Embedding 提供者（SiliconFlowEmbedding / OpenAIEmbedding） |
 | `llm` | `LLMProvider` | ❌ | LLM 提供者，用于自动提取和 `reflect()` |
 | `storage` | `ObjectStorage` | ❌ | 对象存储，用于文件管理（S3Storage） |
-| `auto_extract` | `bool` | ❌ | 是否自动提取记忆（每次 `add_message()` 时），默认 `True` **(v0.2.0 新增)** |
-| `extraction` | `ExtractionStrategy` | ❌ | 自动记忆提取策略（已过时，推荐使用 `auto_extract`） |
+| `auto_extract` | `bool` | ❌ | 是否自动提取记忆（每次 `add_message()` 时），默认 `True` |
+| `reflection_interval` | `int` | ❌ | 在 `auto_extract=True` 模式下，每 N 次提取后自动在后台运行 `reflect()`（0 = 禁用）。需要配置 `llm`。例如 `reflection_interval=10` 表示每 10 条用户消息触发一次后台 reflect，完全不阻塞对话流程。 |
+| `extraction` | `ExtractionStrategy` | ❌ | 自动记忆提取策略（策略模式，与 `auto_extract` 互斥） |
 | `graph_enabled` | `bool` | ❌ | 是否启用图数据库（关系表实现），默认 False |
 | `pool_size` | `int` | ❌ | 数据库连接池大小，默认 10 |
 | `echo` | `bool` | ❌ | 是否输出 SQL 日志，默认 `False`（调试用） |
@@ -379,32 +381,62 @@ result = await nm.recall(
 
 ```python
 {
+    # 提取的记忆（fact / episodic / insight），按三因子评分排序
     "vector_results": [
         {
             "id": "uuid",
-            "content": "我在 Google 工作",
-            "memory_type": "fact",
-            "metadata": {"importance": 8, "emotion": {...}},
-            "created_at": "2024-01-01T00:00:00",
-            "relevance": 0.95,      # 语义相似度
-            "recency": 0.85,        # 时间衰减
-            "importance": 0.8,      # 重要性
-            "score": 0.646,         # 综合评分
+            "content": "[2025-03-01 | sentiment: positive] 在 Google 工作",
+            "memory_type": "fact",              # fact / episodic / insight / general
+            "metadata": {
+                "importance": 8,               # 重要性评分 (1-10)
+                "emotion": {
+                    "valence": 0.6,            # 情感效价 (-1~1)
+                    "arousal": 0.4,            # 情感唤醒 (0~1)
+                    "label": "满足"
+                }
+            },
+            "extracted_timestamp": "2025-03-01T10:00:00",  # 事件发生时间
+            "score": 0.646,                    # 综合评分（relevance × recency × importance）
         },
         ...
     ],
-    "graph_results": [
+    # 原始对话片段，保留了日期、细节，补充 vector_results 遗失的信息
+    "conversation_results": [
         {
             "id": "uuid",
-            "content": "(alice)-[works_at]->(Google)",
-            ...
+            "content": "我在 Google 工作，做后端开发",
+            "role": "user",
+            "session_id": "...",
+            "created_at": "2025-03-01T10:00:00",
+            "similarity": 0.91,
         },
         ...
     ],
+    # 图谱三元组，结构化事实
+    "graph_results": [
+        {
+            "subject": "alice",
+            "relation": "WORKS_AT",
+            "object": "google",
+            "content": "在 Google 工作",
+        },
+        ...
+    ],
+    # 图谱三元组的文本化列表，可直接注入 prompt
+    "graph_context": [
+        "alice → WORKS_AT → google",
+        "alice → HAS_SKILL → python",
+    ],
+    # 用户画像（从 KV profile 读取）
+    "user_profile": {
+        "occupation": "后端工程师",
+        "interests": ["Python", "分布式系统"],
+        "identity": "Alice, 28岁",
+    },
+    # vector_results + conversation_results 去重合并，推荐用于 prompt 组装
     "merged": [
-        # 去重后的综合结果，推荐使用
-        {"content": "...", "source": "vector", ...},
-        {"content": "...", "source": "graph", ...},
+        {"content": "...", "source": "vector", "score": 0.646, ...},
+        {"content": "...", "source": "conversation", "similarity": 0.91, ...},
     ]
 }
 ```
