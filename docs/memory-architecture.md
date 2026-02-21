@@ -173,7 +173,7 @@ nm = NeuroMemory(
 | 特性 | NeuroMemory | Mem0 | Zep | Cognee |
 |------|------------|------|-----|--------|
 | 向量记忆 | pgvector | Qdrant | pgvector | 多种 |
-| 图记忆 | Apache AGE | Neo4j | Neo4j | NetworkX/Neo4j |
+| 图记忆 | PostgreSQL 关系表 | Neo4j | Neo4j | NetworkX/Neo4j |
 | KV 画像/偏好 | PostgreSQL (Profile) | - | - | - |
 | 时态模型 | valid_from/until | - | 双时态 | - |
 | 冲突解决 | 启发式规则 | LLM | LLM | - |

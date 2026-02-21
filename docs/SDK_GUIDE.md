@@ -1,6 +1,6 @@
 # NeuroMemory 使用指南
 
-> **Python 版本**: 3.10+
+> **Python 版本**: 3.12+
 > **最后更新**: 2026-02-21
 
 ---
@@ -325,7 +325,7 @@ await nm.files.delete(file_id=some_uuid)
 
 ## 7. 图数据库
 
-基于 Apache AGE，支持 Cypher 查询。
+图数据库（基于 PostgreSQL 关系表，无 Cypher 依赖）。
 
 ### 7.1 节点和关系类型
 
@@ -408,12 +408,6 @@ path = await nm.graph.find_path(
     "alice", NodeType.USER, "alice",
     NodeType.TOPIC, "machine-learning",
     max_depth=3,
-)
-
-# 自定义 Cypher
-results = await nm.graph.query(
-    "MATCH (u:User)-[:INTERESTED_IN]->(t:Topic) RETURN t",
-    params={},
 )
 ```
 

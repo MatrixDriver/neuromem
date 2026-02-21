@@ -1,7 +1,7 @@
 # NeuroMemory 快速开始指南
 
 > **预计时间**: 10 分钟
-> **最后更新**: 2026-02-11
+> **最后更新**: 2026-02-21
 
 ---
 
@@ -18,7 +18,7 @@
 
 ## 1. 环境要求
 
-- **Python**: 3.10+
+- **Python**: 3.12+
 - **Docker**: 20.0+（用于运行 PostgreSQL）
 - **内存**: 至少 4GB RAM
 
@@ -39,7 +39,7 @@ NeuroMemory 使用 PostgreSQL + pgvector 作为存储后端。提供了预配置
 git clone https://github.com/your-repo/NeuroMemory.git
 cd NeuroMemory
 
-# 启动 PostgreSQL（含 pgvector + Apache AGE 扩展）
+# 启动 PostgreSQL（含 pgvector 扩展）
 docker compose -f docker-compose.yml up -d db
 ```
 
@@ -249,7 +249,7 @@ docker compose -f docker-compose.yml up -d minio
 
 ### 4.4 图数据库
 
-基于 Apache AGE 的知识图谱：
+图数据库（PostgreSQL 关系表实现）：
 
 ```python
 from neuromemory.models.graph import NodeType, EdgeType

@@ -1,6 +1,6 @@
 # NeuroMemory API 参考文档
 
-> **版本**: 0.2.0
+> **版本**: 0.3.0
 > **Python**: 3.12+
 > **最后更新**: 2026-02-21
 
@@ -59,7 +59,7 @@ nm = NeuroMemory(
 | `storage` | `ObjectStorage` | ❌ | 对象存储，用于文件管理（S3Storage） |
 | `auto_extract` | `bool` | ❌ | 是否自动提取记忆（每次 `add_message()` 时），默认 `True` **(v0.2.0 新增)** |
 | `extraction` | `ExtractionStrategy` | ❌ | 自动记忆提取策略（已过时，推荐使用 `auto_extract`） |
-| `graph_enabled` | `bool` | ❌ | 是否启用图数据库（Apache AGE），默认 `False` |
+| `graph_enabled` | `bool` | ❌ | 是否启用图数据库（关系表实现），默认 False |
 | `pool_size` | `int` | ❌ | 数据库连接池大小，默认 10 |
 | `echo` | `bool` | ❌ | 是否输出 SQL 日志，默认 `False`（调试用） |
 
@@ -1007,7 +1007,7 @@ pdfs = await nm.files.search(
 
 ## 图数据库
 
-基于 Apache AGE 的知识图谱。
+图数据库（基于 PostgreSQL 关系表）。
 
 ### nm.graph.create_node()
 
@@ -1149,17 +1149,6 @@ await nm.graph.delete_node(
     node_id: str,
 ) -> None
 ```
-
-### nm.graph.query()
-
-```python
-results = await nm.graph.query(
-    cypher: str,
-    params: dict | None = None,
-) -> list
-```
-
-**执行原始 Cypher 查询**（高级用法）。
 
 ---
 

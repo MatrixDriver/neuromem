@@ -122,7 +122,7 @@ NeuroMemory 的核心使用围绕三个操作：
   2. **更新画像**：整合情感数据，更新用户情感画像
 - 让记忆从"事实"升华为"洞察"
 
-> **关键变化**（v0.2.0）：`add_message()` 现在默认自动提取记忆（`auto_extract=True`），无需手动调用 `extract_memories()` 或 `reflect()`。`reflect()` 专注于生成洞察和情感画像，不再提取基础记忆。
+> **关键变化**（v0.3.0）：`add_message()` 现在默认自动提取记忆（`auto_extract=True`），无需手动调用 `extract_memories()` 或 `reflect()`。`reflect()` 专注于生成洞察和情感画像，不再提取基础记忆。
 
 **逻辑关系**：
 ```
@@ -148,9 +148,9 @@ NeuroMemory 提供 7 种记忆类型，每种有不同的存储和获取方式�
 
 | 记忆类型 | 存储方式 | 底层存储 | 获取方式 | 示例 |
 |---------|---------|---------|---------|------|
-| **事实** | Embedding + Graph | pgvector + Apache AGE | `nm.recall(user_id, query)` | "在 Google 工作" |
+| **事实** | Embedding + Graph | pgvector + 关系表 | `nm.recall(user_id, query)` | "在 Google 工作" |
 | **情景** | Embedding | pgvector | `nm.recall(user_id, query)` | "昨天面试很紧张" |
-| **关系** | Graph Store | Apache AGE | `nm.graph.get_neighbors(user_id, type, id)` | `(user)-[works_at]->(Google)` |
+| **关系** | Graph Store | PostgreSQL 关系表 | `nm.graph.get_neighbors(user_id, type, id)` | `(user)-[works_at]->(Google)` |
 | **洞察** | Embedding | pgvector | `nm.search(user_id, query, memory_type="insight")` | "用户倾向于晚上工作" |
 | **情感画像** | Table | PostgreSQL | `reflect()` 自动更新 | "容易焦虑，对技术兴奋" |
 | **偏好** | KV (Profile) | PostgreSQL | `nm.kv.get(user_id, "profile", "preferences")` | `["喜欢喝咖啡", "偏好深色模式"]` |
@@ -215,7 +215,7 @@ importance = metadata.importance / 10                     # LLM 评估的重要�
 | 情感标注 | ✅ valence/arousal/label | ❌ | ❌ |
 | 重要性评分 + 三因子检索 | ✅ | 🔶 有评分 | ❌ |
 | 反思机制 | ✅ 洞察 + 画像更新 | ❌ | ❌ |
-| 知识图谱 | ✅ Apache AGE (Cypher) | 🔶 简单图 | 🔶 LangGraph |
+| 知识图谱 | ✅ 关系表图谱（无 Cypher 依赖） | 🔶 简单图 | 🔶 LangGraph |
 | 多模态文件 | ✅ PDF/DOCX 提取 | ✅ | ❌ |
 | 框架嵌入 | ✅ Python 库 | ✅ | ✅ |
 | 隐私合规 | ✅ 不推断人格 | ❓ | ❓ |
@@ -455,7 +455,7 @@ async def main():
 │                         │                                   │
 │  ┌──────────────────────▼───────────────────────────────┐  │
 │  │    存储层                                             │  │
-│  │  PostgreSQL + pgvector + AGE │ MinIO/S3 (可选)       │  │
+│  │  PostgreSQL + pgvector │ MinIO/S3 (可选)               │  │
 │  └─────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -466,7 +466,7 @@ async def main():
 |------|------|------|
 | **Framework** | Python 3.12+ async | 直接嵌入 agent 程序 |
 | **数据库** | PostgreSQL 16 + pgvector | 向量检索 + 结构化存储 |
-| **图数据库** | Apache AGE | Cypher 查询语言 |
+| **图数据库** | PostgreSQL 关系表 | 无 Cypher 依赖 |
 | **ORM** | SQLAlchemy 2.0 (async) | asyncpg 驱动 |
 | **Embedding** | 可插拔 Provider | SiliconFlow / OpenAI |
 | **LLM** | 可插拔 Provider | OpenAI / DeepSeek |
@@ -510,7 +510,7 @@ ObjectStorage (ABC)
 - [x] KV 存储
 - [x] 对话管理
 - [x] 文件上传和文本提取
-- [x] Apache AGE 图数据库
+- [x] 图数据库（关系表实现，无 AGE 依赖）
 - [x] LLM 记忆分类提取
 - [x] 可插拔 Provider（Embedding/LLM/Storage）
 
