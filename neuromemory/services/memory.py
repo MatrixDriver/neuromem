@@ -297,6 +297,27 @@ class MemoryService:
         await self.db.flush()
         return memory
 
+    async def delete_all_memories(
+        self,
+        user_id: str,
+        memory_type: Optional[str] = None,
+    ) -> int:
+        """Delete all memories for a user, optionally filtered by type.
+
+        Returns:
+            Number of deleted memories
+        """
+        from sqlalchemy import delete
+
+        conditions = [Embedding.user_id == user_id]
+        if memory_type:
+            conditions.append(Embedding.memory_type == memory_type)
+
+        stmt = delete(Embedding).where(and_(*conditions))
+        result = await self.db.execute(stmt)
+        await self.db.flush()
+        return result.rowcount
+
     async def delete_memory(
         self,
         memory_id: str | uuid.UUID,
