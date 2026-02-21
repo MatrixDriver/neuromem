@@ -39,19 +39,16 @@ pip install -e ".[dev]"  # 包含测试工具
 
 NeuroMemory 需要以下外部服务（**不包含在 pip 包中**）：
 
-### 1. PostgreSQL 16+ with pgvector（必需）
+### 1. PostgreSQL 18 + pgvector + pg_search（必需）
+
+NeuroMemory 使用 [ParadeDB](https://www.paradedb.com/) 镜像，内置 PostgreSQL 18、pgvector 和 pg_search（BM25 全文检索）。
 
 ```bash
-# 使用项目提供的 Docker Compose
+# 使用项目提供的 Docker Compose（推荐）
 docker compose -f docker-compose.yml up -d db
-
-# 或使用官方镜像
-docker run -d -p 5432:5432 \
-  -e POSTGRES_USER=neuromemory \
-  -e POSTGRES_PASSWORD=neuromemory \
-  -e POSTGRES_DB=neuromemory \
-  ankane/pgvector:pg16
 ```
+
+> **pg_search 说明**：pg_search 提供 BM25 关键词检索，与向量检索融合为混合排序（RRF）。若 pg_search 不可用，系统自动降级到 PostgreSQL 内置的 tsvector 全文检索，功能仍可正常使用。
 
 ### 2. Embedding Provider（必需，三选一）
 
@@ -465,7 +462,7 @@ async def main():
 | 组件 | 技术 | 说明 |
 |------|------|------|
 | **Framework** | Python 3.12+ async | 直接嵌入 agent 程序 |
-| **数据库** | PostgreSQL 16 + pgvector | 向量检索 + 结构化存储 |
+| **数据库** | PostgreSQL 18 + pgvector + pg_search | 向量检索 + BM25 混合排序 (ParadeDB) |
 | **图数据库** | PostgreSQL 关系表 | 无 Cypher 依赖 |
 | **ORM** | SQLAlchemy 2.0 (async) | asyncpg 驱动 |
 | **Embedding** | 可插拔 Provider | SiliconFlow / OpenAI |
