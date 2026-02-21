@@ -88,4 +88,6 @@ class GraphEdge(Base, TimestampMixin):
             "edge_type",
             "target_type", "target_id",
         ),
+        # 反向查询索引：find_entity_facts 用 target_id 查找入向边
+        Index("ix_graph_edges_target", "user_id", "target_id"),
     )

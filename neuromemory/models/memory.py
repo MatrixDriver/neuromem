@@ -42,6 +42,7 @@ class Embedding(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_emb_user", "user_id"),
         Index("ix_emb_user_ts", "user_id", "extracted_timestamp"),
+        Index("ix_emb_type_user", "user_id", "memory_type"),
     )
 
     @classmethod
