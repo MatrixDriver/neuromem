@@ -789,9 +789,9 @@ class NeuroMemory:
             else:
                 graph_results = raw
 
-        for i, label in enumerate(["vector", "conversation", "profile"]):
-            if isinstance(results[i], Exception):
-                logger.warning("recall %s fetch failed: %s", label, results[i])
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                logger.warning("recall fetch[%d] failed: %s", i, r)
 
         # Deduplicate by content
         seen_contents: set[str] = set()
@@ -835,9 +835,13 @@ class NeuroMemory:
                             entry["content"] += f". {sentiment_str}"
                 merged.append(entry)
 
-        # conversation_results intentionally excluded from merged:
-        # raw conversation fragments dilute extracted memory quality.
-        # Still returned in "conversation_results" key for inspection.
+        # Merge conversation results when explicitly requested
+        if include_conversations:
+            for r in conversation_results:
+                content = r.get("content", "")
+                if content and content not in seen_contents:
+                    seen_contents.add(content)
+                    merged.append({**r, "source": "conversation"})
 
         graph_context: list[str] = [
             f"{r.get('subject')} → {r.get('relation')} → {r.get('object')}"
