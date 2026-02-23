@@ -50,7 +50,7 @@ class ExtractionStrategy:
     idle_timeout: float = 600
     on_session_close: bool = True
     on_shutdown: bool = True
-    reflection_interval: int = 0  # Trigger reflection every N extractions (0 = disabled)
+    reflection_interval: int = 20  # Trigger reflection every N extractions (0 = disabled)
 
 
 class KVFacade:
@@ -424,13 +424,13 @@ class NeuroMemory:
         graph_enabled: bool = False,
         pool_size: int = 10,
         echo: bool = False,
-        reflection_interval: int = 0,
+        reflection_interval: int = 20,
     ):
         """
         Args:
             reflection_interval: Trigger background reflect() every N user messages per user.
-                0 = disabled. E.g. reflection_interval=20 runs reflect in the background
-                after every 20 user messages. Never blocks add_message(). Requires llm.
+                Default 20: runs reflect in the background after every 20 user messages.
+                0 = disabled. Never blocks add_message(). Requires llm.
         """
         # Set embedding dimensions before any model import
         import neuromemory.models as _models

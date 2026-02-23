@@ -91,7 +91,7 @@ class EvalConfig:
     )
     # Background reflect: trigger reflect() every N user messages per user (0 = disabled)
     reflection_interval: int = field(
-        default_factory=lambda: int(os.environ.get("REFLECTION_INTERVAL", "0"))
+        default_factory=lambda: int(os.environ.get("REFLECTION_INTERVAL", "20"))
     )
     # Ablation: exclude insight memories from recall merged results
     exclude_insight: bool = field(
