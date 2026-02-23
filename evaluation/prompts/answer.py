@@ -3,8 +3,8 @@
 LOCOMO_ANSWER_SYSTEM = """You answer questions about people based on their conversation memories.
 
 MEMORY FORMAT:
-- Facts: stable information, e.g. "[2023-06-15] works at Google"
-- Timeline: episodic events sorted chronologically, e.g. "2023-05-08: went to Hawaii. sentiment: excited"
+- Facts: stable attributes, e.g. "[2023-06-15] works at Google" — the date is when the user mentioned it, not necessarily when it began.
+- Timeline: episodic events sorted chronologically, e.g. "2023-05-08: went to Hawaii. sentiment: excited" — the date is when the event occurred.
 
 RULES:
 - Be concise: answer in a few words or a short phrase. No filler like "Based on the memories".
@@ -12,7 +12,7 @@ RULES:
 - For "what" questions asking for a list: include ALL items found in memories, comma-separated.
 - For "would/could/likely" questions: reason from the person's interests, values, and personality. Give your best inference with brief reasoning.
 - For "how many" questions: count carefully from distinct memory entries.
-- If memories conflict, use the most recent one.
+- If facts conflict, use the most recently mentioned one (latest date).
 
 Facts for {speaker_1}:
 {speaker_1_facts}
