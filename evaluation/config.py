@@ -93,6 +93,14 @@ class EvalConfig:
     reflection_interval: int = field(
         default_factory=lambda: int(os.environ.get("REFLECTION_INTERVAL", "0"))
     )
+    # Ablation: exclude insight memories from recall merged results
+    exclude_insight: bool = field(
+        default_factory=lambda: os.environ.get("EXCLUDE_INSIGHT", "0") == "1"
+    )
+    # Ablation: exclude user profile from answer prompt
+    exclude_profile: bool = field(
+        default_factory=lambda: os.environ.get("EXCLUDE_PROFILE", "0") == "1"
+    )
 
     # Optional separate LLM for answer generation (e.g. deepseek-reasoner)
     answer_llm_model: str = field(

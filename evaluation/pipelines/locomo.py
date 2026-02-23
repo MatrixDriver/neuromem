@@ -232,6 +232,12 @@ async def _query(cfg: EvalConfig, conversations: list[LoCoMoConversation]) -> No
 
             memories_a = recall_a.get("merged", [])
             memories_b = recall_b.get("merged", [])
+
+            # Ablation: optionally exclude insight memories
+            if cfg.exclude_insight:
+                memories_a = [m for m in memories_a if m.get("memory_type") != "insight"]
+                memories_b = [m for m in memories_b if m.get("memory_type") != "insight"]
+
             mem_text_a = "\n".join(
                 f"- {m.get('display_content') or m.get('content', '')}" for m in memories_a
             ) or "No memories found."
@@ -248,9 +254,9 @@ async def _query(cfg: EvalConfig, conversations: list[LoCoMoConversation]) -> No
                 graph_lines = "\n".join(f"- {t}" for t in all_graph[:20])
                 graph_section = f"\n\nKnown relationships:\n{graph_lines}"
 
-            # Collect user profiles
-            profile_a = recall_a.get("user_profile", {})
-            profile_b = recall_b.get("user_profile", {})
+            # Collect user profiles (ablation: optionally exclude)
+            profile_a = {} if cfg.exclude_profile else recall_a.get("user_profile", {})
+            profile_b = {} if cfg.exclude_profile else recall_b.get("user_profile", {})
             profile_section = _format_profiles(
                 user_a, profile_a, user_b, profile_b,
             )
