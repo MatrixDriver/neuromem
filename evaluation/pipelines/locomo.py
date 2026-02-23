@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from evaluation.config import EvalConfig
 from evaluation.datasets.locomo_loader import LoCoMoConversation, load_locomo
@@ -238,12 +238,23 @@ async def _query(cfg: EvalConfig, conversations: list[LoCoMoConversation]) -> No
                 memories_a = [m for m in memories_a if m.get("memory_type") != "insight"]
                 memories_b = [m for m in memories_b if m.get("memory_type") != "insight"]
 
-            mem_text_a = "\n".join(
-                f"- {m.get('display_content') or m.get('content', '')}" for m in memories_a
-            ) or "No memories found."
-            mem_text_b = "\n".join(
-                f"- {m.get('display_content') or m.get('content', '')}" for m in memories_b
-            ) or "No memories found."
+            def _split_memories(memories):
+                facts = [m for m in memories if m.get("memory_type") != "episodic"]
+                episodes = [m for m in memories if m.get("memory_type") == "episodic"]
+                episodes_sorted = sorted(
+                    episodes,
+                    key=lambda m: m.get("extracted_timestamp") or datetime.min.replace(tzinfo=timezone.utc),
+                )
+                facts_text = "\n".join(
+                    f"- {m.get('content', '')}" for m in facts
+                ) or "None."
+                timeline_text = "\n".join(
+                    f"- {m.get('content', '')}" for m in episodes_sorted
+                ) or "None."
+                return facts_text, timeline_text
+
+            facts_text_a, timeline_text_a = _split_memories(memories_a)
+            facts_text_b, timeline_text_b = _split_memories(memories_b)
 
             # Collect graph context
             graph_ctx_a = recall_a.get("graph_context", [])
@@ -266,8 +277,10 @@ async def _query(cfg: EvalConfig, conversations: list[LoCoMoConversation]) -> No
             system_content = LOCOMO_ANSWER_SYSTEM.format(
                 speaker_1=user_a,
                 speaker_2=user_b,
-                speaker_1_memories=mem_text_a,
-                speaker_2_memories=mem_text_b,
+                speaker_1_facts=facts_text_a,
+                speaker_1_timeline=timeline_text_a,
+                speaker_2_facts=facts_text_b,
+                speaker_2_timeline=timeline_text_b,
             ) + graph_section + profile_section
 
             predicted = await _retry_on_rate_limit(

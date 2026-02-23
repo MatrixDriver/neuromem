@@ -589,7 +589,11 @@ Return format (JSON only, no other content):
 
         # Level 3: Try extracting from content text
         result = self._temporal.extract(content, ref_time)
-        return result
+        if result:
+            return result
+
+        # Level 4: Fall back to session reference time so every memory has a timestamp
+        return ref_time
 
     async def _store_facts(
         self,

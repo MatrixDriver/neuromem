@@ -793,23 +793,35 @@ class NeuroMemory:
                 seen_contents.add(content)
                 entry = {**r, "source": "vector"}
                 # Enrich content with metadata for LLM context
-                prefix_parts: list[str] = []
                 ts = r.get("extracted_timestamp")
-                if ts:
-                    ts_str = ts.strftime("%Y-%m-%d") if hasattr(ts, "strftime") else str(ts)[:10]
-                    prefix_parts.append(ts_str)
+                ts_str = (ts.strftime("%Y-%m-%d") if hasattr(ts, "strftime") else str(ts)[:10]) if ts else None
                 meta = r.get("metadata") or {}
                 emotion = meta.get("emotion") if isinstance(meta, dict) else None
+                sentiment_str = None
                 if emotion and isinstance(emotion, dict):
                     label = emotion.get("label", "")
                     valence = emotion.get("valence")
                     if label:
-                        prefix_parts.append(f"sentiment: {label}")
+                        sentiment_str = f"sentiment: {label}"
                     elif valence is not None:
                         tone = "positive" if valence > 0.2 else "negative" if valence < -0.2 else "neutral"
-                        prefix_parts.append(f"sentiment: {tone}")
-                if prefix_parts:
-                    entry["content"] = f"[{' | '.join(prefix_parts)}] {content}"
+                        sentiment_str = f"sentiment: {tone}"
+
+                if r.get("memory_type") == "episodic":
+                    # Episodic format: "YYYY-MM-DD: content. sentiment: X"
+                    if ts_str:
+                        entry["content"] = f"{ts_str}: {content}" + (f". {sentiment_str}" if sentiment_str else "")
+                    elif sentiment_str:
+                        entry["content"] = f"{content}. {sentiment_str}"
+                else:
+                    # Facts/insights: keep bracket format "[date | sentiment] content"
+                    prefix_parts = []
+                    if ts_str:
+                        prefix_parts.append(ts_str)
+                    if sentiment_str:
+                        prefix_parts.append(sentiment_str)
+                    if prefix_parts:
+                        entry["content"] = f"[{' | '.join(prefix_parts)}] {content}"
                 merged.append(entry)
 
         # conversation_results intentionally excluded from merged:
