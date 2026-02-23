@@ -349,6 +349,12 @@ class MemoryExtractionService:
    - 一次性事件（"昨天去了X"、"上周做了Y"）应放入 Episodes，**不要**同时作为 Fact 重复。若该事件揭示了持久特征，提取推断出的属性（如"用户喜欢古典音乐"），而非复述事件本身
    - 错误示范: "用户去悉尼歌剧院听贝多芬交响乐"（一次性事件，应放 Episodes）
    - 正确示范: "用户喜欢古典音乐" 或 "用户对贝多芬感兴趣"（从事件推断的持久偏好）
+   - **保留具体细节**：提取兴趣/爱好/偏好时，必须保留用户提到的**具体内容**，不要泛化成宽泛类别
+     - 错误: "用户喜欢户外活动"（太笼统，丢失所有细节）
+     - 正确: "用户喜欢恐龙和大自然"（保留具体话题）
+     - 错误: "用户喜欢绘画"（丢失了画什么）
+     - 正确: "用户喜欢画日落风景"（保留具体内容）
+     - 规则：如果用户提到了具体的事物（动物、地点、话题等），必须在 fact 中明确写出
    - 每个 fact 必须是原子的：一条 fact 只包含一个独立信息
    - 每个 fact 必须有明确的主语（禁止使用代词如"他/她/它"）
    - 必须将代词还原为实际名称："她在那里工作" → "Caroline 在心理咨询中心工作"
@@ -462,6 +468,12 @@ Extract the following memories:
    - One-time events ("went to X yesterday", "did Y last week") belong in Episodes — do NOT duplicate them as Facts. If an event reveals a lasting trait, extract the inferred attribute (e.g. "The user enjoys classical music"), not a restatement of the event itself.
    - BAD: "The user went to Sydney Opera House to listen to Beethoven" (one-time event → put in Episodes)
    - GOOD: "The user enjoys classical music" or "The user is a fan of Beethoven" (persistent preference inferred from the event)
+   - **PRESERVE SPECIFICS**: When extracting interests/hobbies/preferences, keep the SPECIFIC details. Do NOT abstract into generic categories.
+     - BAD: "The user enjoys outdoor activities" — too vague, loses all detail
+     - GOOD: "The user likes dinosaurs and nature" — specific topics preserved
+     - BAD: "The user likes painting" — loses what they paint
+     - GOOD: "The user likes painting sunsets" — specific subject preserved
+     - Rule: if the user mentioned specific things (animals, places, topics, etc.), include them explicitly
    - Each fact MUST be atomic: one single piece of information per fact
    - Each fact MUST be self-contained with explicit subject (never use pronouns like "she/he/they")
    - Always resolve pronouns to actual names: "She works there" → "Caroline works at the counseling center"
