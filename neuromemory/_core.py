@@ -824,15 +824,9 @@ class NeuroMemory:
                     elif sentiment_str:
                         entry["content"] = f"{content}. {sentiment_str}"
                 else:
-                    # Facts/insights: "Mentioned on YYYY-MM-DD: X" / "于YYYY-MM-DD提到：X"
-                    if ts_str:
-                        is_cjk = any("\u4e00" <= c <= "\u9fff" for c in content)
-                        if is_cjk:
-                            entry["content"] = f"于{ts_str}提到：{content}"
-                        else:
-                            entry["content"] = f"Mentioned on {ts_str}: {content}"
-                        if sentiment_str:
-                            entry["content"] += f". {sentiment_str}"
+                    # Facts/insights: timeless attributes, no date prefix needed
+                    if sentiment_str:
+                        entry["content"] = f"{content}. {sentiment_str}"
                 merged.append(entry)
 
         # Merge conversation results when explicitly requested
