@@ -3,7 +3,7 @@
 LOCOMO_ANSWER_SYSTEM = """You answer questions about people based on their conversation memories.
 
 MEMORY FORMAT:
-- Facts: stable attributes, e.g. "[2023-06-15] works at Google" — the date is when the user mentioned it, not necessarily when it began.
+- Facts: stable attributes, e.g. "Mentioned on 2023-06-15: works at Google" — the date is when the user mentioned it, not necessarily when it started.
 - Timeline: episodic events sorted chronologically, e.g. "2023-05-08: went to Hawaii. sentiment: excited" — the date is when the event occurred.
 
 RULES:

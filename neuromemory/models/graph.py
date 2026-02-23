@@ -35,11 +35,17 @@ class EdgeType(str, Enum):
     BELONGS_TO = "BELONGS_TO"
     USES = "USES"
     # Episode-specific relations (v0.2.0)
-    MET = "MET"  # user met someone
+    MET = "MET"          # user met someone
     ATTENDED = "ATTENDED"  # user attended an event
-    VISITED = "VISITED"  # user visited a place
+    VISITED = "VISITED"   # user visited a place
     OCCURRED_AT = "OCCURRED_AT"  # episode occurred at a location
     OCCURRED_ON = "OCCURRED_ON"  # episode occurred on a date
+    # Extended relations (v0.5.2)
+    HOBBY = "HOBBY"          # concrete hobby activity (hiking, chess, photography…)
+    OWNS = "OWNS"            # owns a concrete thing (pet, car, house…)
+    LOCATED_IN = "LOCATED_IN"  # organization/entity located in a place
+    BORN_IN = "BORN_IN"      # person born in a location
+    SPEAKS = "SPEAKS"        # speaks a language
     CUSTOM = "CUSTOM"
 
 

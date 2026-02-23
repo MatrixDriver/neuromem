@@ -123,11 +123,13 @@ class GraphService:
                 select(GraphEdge).where(*out_conditions).limit(limit)
             )
             for edge in out_result.scalars().all():
+                props = edge.properties or {}
+                rel = props.get("relation_name") if edge.edge_type == "CUSTOM" else edge.edge_type
                 results.append({
                     "neighbor_type": edge.target_type,
                     "neighbor_id": edge.target_id,
-                    "rel_type": edge.edge_type,
-                    "rel_props": edge.properties,
+                    "rel_type": rel,
+                    "rel_props": props,
                     "direction": "out",
                 })
 
@@ -142,11 +144,13 @@ class GraphService:
                     select(GraphEdge).where(*in_conditions).limit(remaining)
                 )
                 for edge in in_result.scalars().all():
+                    props = edge.properties or {}
+                    rel = props.get("relation_name") if edge.edge_type == "CUSTOM" else edge.edge_type
                     results.append({
                         "neighbor_type": edge.source_type,
                         "neighbor_id": edge.source_id,
-                        "rel_type": edge.edge_type,
-                        "rel_props": edge.properties,
+                        "rel_type": rel,
+                        "rel_props": props,
                         "direction": "in",
                     })
 

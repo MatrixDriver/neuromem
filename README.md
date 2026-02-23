@@ -154,7 +154,7 @@ agent 需要上下文 → 召回记忆 (recall)
 
 **配置选项**：
 - **自动模式**（默认，推荐）：`auto_extract=True`，每次 `add_message` 都提取记忆
-- **自动模式 + 后台 reflect**：`auto_extract=True, reflection_interval=10`，每 10 次提取后自动后台 reflect，无阻塞
+- **自动模式 + 后台 reflect**：`auto_extract=True, reflection_interval=20`，每 20 次提取后自动后台 reflect，无阻塞
 - **手动模式**：`auto_extract=False`，手动调用 `extract_memories()`
 - **策略模式**：`auto_extract=False` + `ExtractionStrategy(message_interval=10)`，每 10 条消息触发
 
@@ -311,12 +311,12 @@ result = await nm.reflect(user_id="alice")
 nm = NeuroMemory(
     ...,
     auto_extract=True,           # 每条消息自动提取记忆（默认）
-    reflection_interval=10,      # 每 10 次提取后，后台自动 reflect()（0 = 禁用）
+    reflection_interval=20,      # 每 20 次提取后，后台自动 reflect()（0 = 禁用；默认 20）
     llm=OpenAILLM(api_key="..."),
 )
 ```
 
-- `reflection_interval=10`：用户每说 10 句话，后台自动运行一次 reflect，生成洞察
+- `reflection_interval=20`：用户每说 20 句话，后台自动运行一次 reflect，生成洞察（默认值）
 - reflect 使用 `asyncio.create_task()`，**完全不阻塞** `add_message()` 的响应
 - reflect 生成的 `insight` 自动进入 recall() 的向量检索，下次对话立即可用
 
@@ -341,7 +341,7 @@ nm = NeuroMemory(
 ```
 
 **推荐配置**：
-- **实时对话**（推荐）：`auto_extract=True, reflection_interval=10`，最简单
+- **实时对话**（推荐）：`auto_extract=True, reflection_interval=20`，最简单
 - **精细控制**：`ExtractionStrategy(message_interval=10, reflection_interval=50)`
 - **批处理**（每日总结）：`auto_extract=False, on_session_close=True`，手动调用 `reflect()`
 
@@ -369,21 +369,37 @@ result["graph_results"]        # 图谱原始三元组
 
 **merged 中每条记忆的关键字段**：
 ```python
+# 事实记忆（fact）：时间戳 = 用户提及该信息的时间（非事情开始的时间）
+{"content": "于2025-03-01提到：在 Google 工作",                     "memory_type": "fact",     "score": 0.82}
+# 情节记忆（episodic）：时间戳 = 事件发生的时间
+{"content": "2025-03-01: 压力很大，担心项目延期. sentiment: anxious", "memory_type": "episodic", "score": 0.75}
+# 洞察记忆（insight）：reflect() 自动生成，无时间前缀
+{"content": "工作压力大时倾向于回避社交，独自消化",                   "memory_type": "insight",  "score": 0.68}
+
+# 完整字段
 {
-    "content": "[2025-03-01 | sentiment: positive] 在 Google 工作",
-    "source": "vector",          # "vector" 或 "conversation"
-    "memory_type": "fact",       # fact / episodic / insight
-    "score": 0.646,              # 综合评分（recall 三因子）
+    "content": "...",                              # 格式化后的内容（含时间前缀）
+    "source": "vector",                            # "vector" 或 "conversation"
+    "memory_type": "fact",                         # fact / episodic / insight
+    "score": 0.646,                                # 综合评分（相关性 × 时效 × 重要性）
+    "extracted_timestamp": "2025-03-01T00:00:00+00:00",  # 可用于时间排序
     "metadata": {
-        "importance": 8,         # 重要性 (1-10)
+        "importance": 8,                           # 重要性 (1-10)
         "emotion": {"label": "满足", "valence": 0.6}
     }
 }
 ```
 
+> **时间戳含义**：
+> - `fact` 的时间 = 用户**提到**该信息的时间，不代表事情开始的时间
+> - `episodic` 的时间 = 事件**发生**的时间
+> - 组装 prompt 时应向 LLM 说明这一区别，避免误判时间线
+
 ### 推荐的 Prompt 组装模板
 
 ```python
+from datetime import datetime, timezone
+
 def build_system_prompt(recall_result: dict, user_input: str) -> str:
     """将 recall() 结果组装为 LLM system prompt。"""
 
@@ -398,14 +414,15 @@ def build_system_prompt(recall_result: dict, user_input: str) -> str:
         profile_lines.append(f"兴趣：{profile['interests']}")
     profile_text = "\n".join(profile_lines) if profile_lines else "暂无"
 
-    # 2. merged 按类型分层，提取最相关的记忆
+    # 2. merged 按类型分层：facts/insights 按相关性，episodes 按时间升序
     merged = recall_result.get("merged", [])
-    facts     = [m for m in merged if m.get("memory_type") == "fact"][:3]
-    episodes  = [m for m in merged if m.get("memory_type") == "episodic"][:2]
-    insights  = [m for m in merged if m.get("memory_type") == "insight"][:2]
-    # 其余高分记忆（对话片段等）
-    others    = [m for m in merged
-                 if m.get("memory_type") not in ("fact", "episodic", "insight")][:2]
+    facts    = [m for m in merged if m.get("memory_type") == "fact"][:5]
+    insights = [m for m in merged if m.get("memory_type") == "insight"][:3]
+    # 情节记忆按时间升序 → 完整时间线
+    episodes = sorted(
+        [m for m in merged if m.get("memory_type") == "episodic"],
+        key=lambda m: m.get("extracted_timestamp") or datetime.min.replace(tzinfo=timezone.utc),
+    )[:5]
 
     def fmt(items):
         return "\n".join(f"- {m['content']}" for m in items) or "暂无"
@@ -420,9 +437,10 @@ def build_system_prompt(recall_result: dict, user_input: str) -> str:
 {profile_text}
 
 ## 关于当前话题，你记得的事实
+（括号内时间 = 用户提及该信息的时间，不代表事情开始的时间）
 {fmt(facts)}
 
-## 相关经历和情景
+## 事件时间线（按时间排序）
 {fmt(episodes)}
 
 ## 对用户的深层理解（洞察）
@@ -430,9 +448,6 @@ def build_system_prompt(recall_result: dict, user_input: str) -> str:
 
 ## 结构化关系
 {graph_text}
-
-## 其他相关记忆
-{fmt(others)}
 
 ---
 请根据以上记忆自然地回应用户，不要逐条引用记忆，而是像一个真正了解他的朋友那样对话。
@@ -486,7 +501,7 @@ async def main():
         embedding=SiliconFlowEmbedding(api_key="..."),
         llm=OpenAILLM(api_key="..."),
         auto_extract=True,        # 每条消息自动提取记忆
-        reflection_interval=10,   # 每 10 次提取后后台自动 reflect，生成洞察
+        reflection_interval=20,   # 每 20 次提取后后台自动 reflect，生成洞察（默认值）
     ) as nm:
         agent = MemoryAgent(nm, AsyncOpenAI(api_key="..."))
 
@@ -506,181 +521,14 @@ async def main():
 |------|------|
 | **一次 recall，完整上下文** | 一次 `recall()` 已包含 merged、profile、graph，无需额外查询 |
 | **profile 放 system prompt** | 职业、兴趣等稳定画像每次都要注入，是 agent 个性化的基础 |
-| **merged 按类型分层** | fact（事实）→ episodic（经历）→ insight（洞察）→ 其他，优先级递减 |
+| **merged 按类型分层** | facts/insights 按相关性，episodes 按时间升序排列，呈现完整时间线 |
+| **时间戳含义要说清** | fact 时间 = 用户提及时间；episodic 时间 = 事件发生时间；需在 prompt 中注明区别 |
 | **graph_context 补充结构化知识** | 向量检索可能遗漏"alice 在 Google 工作"这类关系，图谱能补充 |
-| **insight 无需单独 search** | `reflection_interval` 开启后，insight 自动进入 merged，无需额外调用 |
-| **token 预算控制** | 每类记忆取 2-3 条，总记忆上下文建议 300-500 tokens |
+| **insight 无需单独 search** | 默认 `reflection_interval=20`，insight 自动进入 merged，无需额外调用 |
+| **token 预算控制** | 每类记忆取 3-5 条，总记忆上下文建议 400-600 tokens |
 | **自然注入，不逐条引用** | system prompt 结尾提示 LLM"像朋友一样对话"，避免机械引用 |
 
 ---
-
-## 如何用 recall() 组装 Prompt（最佳实践）
-
-> 可运行的完整示例见 **[example/](example/)**，支持终端交互、命令查询、自动记忆提取。
-
-这是使用 NeuroMemory 最关键的一步——**如何把 recall() 的结果变成高质量的 LLM 上下文**。正确组装 prompt 能充分利用 NeuroMemory 的全部能力：三因子检索、图谱关系、用户画像、情感洞察。
-
-### recall() 返回的完整结构
-
-```python
-result = await nm.recall(user_id="alice", query=user_input, limit=10)
-
-# result 包含以下字段：
-result["merged"]               # ⭐ 主要使用：vector + conversation 去重合并，已按评分排序
-result["user_profile"]         # ⭐ 用户画像：occupation, interests, identity 等
-result["graph_context"]        # ⭐ 图谱三元组文本：["alice → WORKS_AT → google", ...]
-result["vector_results"]       # 提取的记忆（fact/episodic/insight），含评分
-result["conversation_results"] # 原始对话片段，保留了日期细节
-result["graph_results"]        # 图谱原始三元组
-```
-
-**merged 中每条记忆的关键字段**：
-```python
-{
-    "content": "[2025-03-01 | sentiment: positive] 在 Google 工作",
-    "source": "vector",          # "vector" 或 "conversation"
-    "memory_type": "fact",       # fact / episodic / insight
-    "score": 0.646,              # 综合评分（recall 三因子）
-    "metadata": {
-        "importance": 8,         # 重要性 (1-10)
-        "emotion": {"label": "满足", "valence": 0.6}
-    }
-}
-```
-
-### 推荐的 Prompt 组装模板
-
-```python
-def build_system_prompt(recall_result: dict, user_input: str) -> str:
-    """将 recall() 结果组装为 LLM system prompt。"""
-
-    # 1. 用户画像 → 稳定背景信息，始终放在 system prompt 中
-    profile = recall_result.get("user_profile", {})
-    profile_lines = []
-    if profile.get("identity"):
-        profile_lines.append(f"身份：{profile['identity']}")
-    if profile.get("occupation"):
-        profile_lines.append(f"职业：{profile['occupation']}")
-    if profile.get("interests"):
-        profile_lines.append(f"兴趣：{profile['interests']}")
-    profile_text = "\n".join(profile_lines) if profile_lines else "暂无"
-
-    # 2. merged 按类型分层，提取最相关的记忆
-    merged = recall_result.get("merged", [])
-    facts     = [m for m in merged if m.get("memory_type") == "fact"][:3]
-    episodes  = [m for m in merged if m.get("memory_type") == "episodic"][:2]
-    insights  = [m for m in merged if m.get("memory_type") == "insight"][:2]
-    # 其余高分记忆（对话片段等）
-    others    = [m for m in merged
-                 if m.get("memory_type") not in ("fact", "episodic", "insight")][:2]
-
-    def fmt(items):
-        return "\n".join(f"- {m['content']}" for m in items) or "暂无"
-
-    # 3. 图谱关系 → 结构化事实，补充向量检索的盲区
-    graph_lines = recall_result.get("graph_context", [])[:5]
-    graph_text = "\n".join(f"- {g}" for g in graph_lines) or "暂无"
-
-    return f"""你是一个有长期记忆的 AI 助手，能根据对用户的了解提供个性化回复。
-
-## 用户画像
-{profile_text}
-
-## 关于当前话题，你记得的事实
-{fmt(facts)}
-
-## 相关经历和情景
-{fmt(episodes)}
-
-## 对用户的深层理解（洞察）
-{fmt(insights)}
-
-## 结构化关系
-{graph_text}
-
-## 其他相关记忆
-{fmt(others)}
-
----
-请根据以上记忆自然地回应用户，不要逐条引用记忆，而是像一个真正了解他的朋友那样对话。
-如果记忆与当前问题不相关，忽略它们即可。"""
-```
-
-### 完整 Agent 实现
-
-```python
-import asyncio
-from neuromemory import NeuroMemory, SiliconFlowEmbedding, OpenAILLM
-from openai import AsyncOpenAI
-
-class MemoryAgent:
-    def __init__(self, nm: NeuroMemory, openai_client: AsyncOpenAI):
-        self.nm = nm
-        self.llm = openai_client
-
-    async def chat(self, user_id: str, user_input: str) -> str:
-        # 1. 存储用户消息（后台自动提取记忆，不阻塞）
-        await self.nm.conversations.add_message(
-            user_id=user_id, role="user", content=user_input
-        )
-
-        # 2. 召回相关记忆（一次 recall 获取所有上下文）
-        recall_result = await self.nm.recall(user_id=user_id, query=user_input, limit=10)
-
-        # 3. 组装 system prompt
-        system_prompt = build_system_prompt(recall_result, user_input)
-
-        # 4. 调用 LLM
-        response = await self.llm.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_input},
-            ]
-        )
-        reply = response.choices[0].message.content
-
-        # 5. 存储 assistant 回复
-        await self.nm.conversations.add_message(
-            user_id=user_id, role="assistant", content=reply
-        )
-        return reply
-
-
-async def main():
-    async with NeuroMemory(
-        database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
-        embedding=SiliconFlowEmbedding(api_key="..."),
-        llm=OpenAILLM(api_key="..."),
-        auto_extract=True,        # 每条消息自动提取记忆
-        reflection_interval=10,   # 每 10 次提取后后台自动 reflect，生成洞察
-    ) as nm:
-        agent = MemoryAgent(nm, AsyncOpenAI(api_key="..."))
-
-        reply = await agent.chat("alice", "我在 Google 工作，做后端开发，最近压力很大")
-        print(f"Agent: {reply}")
-        # → 自动提取：fact "在 Google 工作"，episodic "最近压力很大"
-        # → 图谱关系：(alice)-[WORKS_AT]->(google)
-
-        reply = await agent.chat("alice", "有什么减压的建议吗？")
-        print(f"Agent: {reply}")
-        # → recall 返回"最近压力很大"的情景记忆和画像，agent 给出个性化建议
-```
-
-### 组装 Prompt 的核心原则
-
-| 原则 | 说明 |
-|------|------|
-| **一次 recall，完整上下文** | 一次 `recall()` 已包含 merged、profile、graph，无需额外查询 |
-| **profile 放 system prompt** | 职业、兴趣等稳定画像每次都要注入，是 agent 个性化的基础 |
-| **merged 按类型分层** | fact（事实）→ episodic（经历）→ insight（洞察）→ 其他，优先级递减 |
-| **graph_context 补充结构化知识** | 向量检索可能遗漏"alice 在 Google 工作"这类关系，图谱能补充 |
-| **insight 无需单独 search** | `reflection_interval` 开启后，insight 自动进入 merged，无需额外调用 |
-| **token 预算控制** | 每类记忆取 2-3 条，总记忆上下文建议 300-500 tokens |
-| **自然注入，不逐条引用** | system prompt 结尾提示 LLM"像朋友一样对话"，避免机械引用 |
-
----
-
 
 ## 架构
 

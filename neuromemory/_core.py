@@ -814,14 +814,15 @@ class NeuroMemory:
                     elif sentiment_str:
                         entry["content"] = f"{content}. {sentiment_str}"
                 else:
-                    # Facts/insights: keep bracket format "[date | sentiment] content"
-                    prefix_parts = []
+                    # Facts/insights: "Mentioned on YYYY-MM-DD: X" / "于YYYY-MM-DD提到：X"
                     if ts_str:
-                        prefix_parts.append(ts_str)
-                    if sentiment_str:
-                        prefix_parts.append(sentiment_str)
-                    if prefix_parts:
-                        entry["content"] = f"[{' | '.join(prefix_parts)}] {content}"
+                        is_cjk = any("\u4e00" <= c <= "\u9fff" for c in content)
+                        if is_cjk:
+                            entry["content"] = f"于{ts_str}提到：{content}"
+                        else:
+                            entry["content"] = f"Mentioned on {ts_str}: {content}"
+                        if sentiment_str:
+                            entry["content"] += f". {sentiment_str}"
                 merged.append(entry)
 
         # conversation_results intentionally excluded from merged:

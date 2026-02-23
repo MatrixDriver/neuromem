@@ -297,11 +297,14 @@ class MemoryExtractionService:
             triples_section = """
 4. **Triples（实体关系三元组）**: 从 Facts 和 Episodes 中提取的结构化关系
    - 格式: {{"subject": "主体", "subject_type": "类型", "relation": "关系", "object": "客体", "object_type": "类型", "content": "原始描述", "confidence": 0.0-1.0}}
-   - subject_type/object_type 可选: user, person, organization, location, event, skill, concept, entity
-   - Facts 关系: works_at, lives_in, has_skill, studied_at, uses, knows
-   - Episodes 关系: met (见面), attended (参加), visited (访问), occurred_at (发生地点), occurred_on (发生时间)
+   - subject_type/object_type 可选: user, person, organization, location, skill, entity（**禁止使用 concept**）
+   - **object 必须是可命名的真实实体**：具体的人、地点、组织、工具、技能、语言、具体活动（如"徒步"、"国际象棋"）
+   - **禁止**将抽象概念、描述性短语、情绪作为 object（如"贝多芬的音乐"、"压力"、"美好生活"）
+   - Facts 关系（优先使用）: works_at, lives_in, has_skill, studied_at, uses, knows, hobby, owns, speaks, born_in
+   - Episodes 关系: met (见面), attended (参加活动), visited (访问地点), occurred_at (发生地点)
    - 用户自身 subject 填 "user"，subject_type 填 "user"
-   - 每个 Fact 和 Episode 尽量提取对应的 triple"""
+   - confidence < 0.6 的 triple 不要输出
+   - 只为有明确实体 object 的 Fact/Episode 提取 triple，没有则跳过"""
             triples_output = ',\n  "triples": [...]'
 
         temporal_section = ""
@@ -406,11 +409,14 @@ class MemoryExtractionService:
             triples_section = """
 4. **Triples (Entity-Relation Triples)**: Structured relationships extracted from Facts and Episodes
    - Format: {{"subject": "entity", "subject_type": "type", "relation": "relation", "object": "entity", "object_type": "type", "content": "original description", "confidence": 0.0-1.0}}
-   - subject_type/object_type options: user, person, organization, location, event, skill, concept, entity
-   - Facts relations: works_at, lives_in, has_skill, studied_at, uses, knows
-   - Episodes relations: met (met someone), attended (attended event), visited (visited place), occurred_at (location), occurred_on (time)
+   - subject_type/object_type options: user, person, organization, location, skill, entity (**never use "concept"**)
+   - **object MUST be a concrete, nameable real-world entity**: a specific person, place, organization, tool, skill, language, or concrete activity (e.g. "hiking", "chess")
+   - **Do NOT** use abstract concepts, descriptive phrases, or emotions as object (e.g. "Beethoven's music", "stress", "a good life")
+   - Facts relations (prefer these): works_at, lives_in, has_skill, studied_at, uses, knows, hobby, owns, speaks, born_in
+   - Episodes relations: met (met someone), attended (attended event), visited (visited place), occurred_at (location)
    - For user's own: subject="user", subject_type="user"
-   - Extract corresponding triple for each Fact and Episode when possible"""
+   - Skip triples with confidence < 0.6
+   - Only extract a triple when the object is a concrete entity — skip otherwise"""
             triples_output = ',\n  "triples": [...]'
             profile_num = 5
 

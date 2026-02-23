@@ -13,19 +13,23 @@ from neuromemory.models.graph import EdgeType, GraphEdge, GraphNode, NodeType
 
 logger = logging.getLogger(__name__)
 
+# Minimum confidence to store a triple — filters low-confidence LLM extractions
+_MIN_TRIPLE_CONFIDENCE: float = 0.6
+
 # Mapping from LLM-extracted type strings to NodeType enums
+# NOTE: "concept" is intentionally absent — concept-type objects are filtered at storage time
 _NODE_TYPE_MAP: dict[str, NodeType] = {
     "user": NodeType.USER,
     "person": NodeType.ENTITY,
     "organization": NodeType.ORGANIZATION,
     "location": NodeType.LOCATION,
     "skill": NodeType.SKILL,
-    "concept": NodeType.CONCEPT,
     "entity": NodeType.ENTITY,
 }
 
 # Mapping from relation strings to EdgeType enums
 _EDGE_TYPE_MAP: dict[str, EdgeType] = {
+    # Core fact relations
     "works_at": EdgeType.WORKS_AT,
     "lives_in": EdgeType.LIVES_IN,
     "has_skill": EdgeType.HAS_SKILL,
@@ -35,6 +39,19 @@ _EDGE_TYPE_MAP: dict[str, EdgeType] = {
     "knows": EdgeType.KNOWS,
     "related_to": EdgeType.RELATED_TO,
     "mentions": EdgeType.MENTIONS,
+    # Episode relations
+    "met": EdgeType.MET,
+    "attended": EdgeType.ATTENDED,
+    "visited": EdgeType.VISITED,
+    "occurred_at": EdgeType.OCCURRED_AT,
+    "occurred_on": EdgeType.OCCURRED_ON,
+    # Extended relations (v0.5.2)
+    "hobby": EdgeType.HOBBY,
+    "has_hobby": EdgeType.HOBBY,
+    "owns": EdgeType.OWNS,
+    "located_in": EdgeType.LOCATED_IN,
+    "born_in": EdgeType.BORN_IN,
+    "speaks": EdgeType.SPEAKS,
 }
 
 
@@ -88,8 +105,16 @@ class GraphMemoryService:
             if not subject or not obj or not relation:
                 continue
 
+            # Filter low-confidence triples
+            confidence = float(triple.get("confidence", 1.0))
+            if confidence < _MIN_TRIPLE_CONFIDENCE:
+                continue
+
             stype = _resolve_node_type(triple.get("subject_type", "entity"))
             otype = _resolve_node_type(triple.get("object_type", "entity"))
+            # Skip concept-type nodes — abstract concepts pollute the graph
+            if otype == NodeType.CONCEPT or stype == NodeType.CONCEPT:
+                continue
             etype = _resolve_edge_type(relation)
             sid = user_id if stype == NodeType.USER else _normalize_node_id(subject)
             oid = _normalize_node_id(obj)
