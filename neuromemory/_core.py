@@ -458,6 +458,7 @@ class NeuroMemory:
         self._active_sessions: set[tuple[str, str]] = set()
         self._extraction_counts: dict[str, int] = {}  # user_id -> count (ExtractionStrategy mode)
         self._reflect_counts: dict[str, int] = {}      # user_id -> count (reflection_interval mode)
+        self._bg_tasks: list[asyncio.Task] = []        # background reflect tasks (awaited on close)
 
         # Embedding cache for query deduplication (reduces API calls)
         self._embedding_cache: OrderedDict[str, list[float]] = OrderedDict()
@@ -509,6 +510,13 @@ class NeuroMemory:
                 await self._do_extraction(user_id, session_id)
         self._active_sessions.clear()
         self._msg_counts.clear()
+
+        # Await all pending background reflect tasks before closing DB
+        pending = [t for t in self._bg_tasks if not t.done()]
+        if pending:
+            logger.debug("Waiting for %d background reflect task(s) to complete", len(pending))
+            await asyncio.gather(*pending, return_exceptions=True)
+        self._bg_tasks.clear()
 
         await self._db.close()
 
@@ -1059,7 +1067,8 @@ class NeuroMemory:
                     await self._reflect_impl(user_id, batch_size)
                 except Exception as e:
                     logger.error("Background reflect failed: user=%s error=%s", user_id, e)
-            asyncio.create_task(_safe_reflect())
+            task = asyncio.create_task(_safe_reflect())
+            self._bg_tasks.append(task)
             return None
         return await self._reflect_impl(user_id, batch_size)
 
