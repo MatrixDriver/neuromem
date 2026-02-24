@@ -77,7 +77,7 @@ async def test_recall_includes_conversation_results(mock_embedding):
     await asyncio.sleep(0.1)
 
     # Recall should search conversations
-    result = await nm.recall(user_id=user_id, query="Google 大会", limit=10)
+    result = await nm.recall(user_id=user_id, query="Google 大会", limit=10, include_conversations=True)
 
     # Should have conversation_results key
     assert "conversation_results" in result
@@ -138,7 +138,7 @@ async def test_conversation_preserves_temporal_details(mock_embedding):
     await asyncio.sleep(0.2)
 
     # Recall
-    result = await nm.recall(user_id=user_id, query="技术大会", limit=10)
+    result = await nm.recall(user_id=user_id, query="技术大会", limit=10, include_conversations=True)
 
     # Check extracted memory (loses details)
     memory_contents = [m["content"] for m in result["vector_results"]]
@@ -187,7 +187,7 @@ async def test_merged_results_deduplicate_conversations_and_memories(mock_embedd
     await asyncio.sleep(0.1)
 
     # Recall
-    result = await nm.recall(user_id=user_id, query="工作", limit=10)
+    result = await nm.recall(user_id=user_id, query="工作", limit=10, include_conversations=True)
 
     # Should have both sources
     assert len(result["vector_results"]) > 0
@@ -234,7 +234,7 @@ async def test_conversation_recall_with_role_and_session(mock_embedding):
     await asyncio.sleep(0.1)
 
     # Recall
-    result = await nm.recall(user_id=user_id, query="Python 异步", limit=10)
+    result = await nm.recall(user_id=user_id, query="Python 异步", limit=10, include_conversations=True)
 
     # Should find conversations
     assert len(result["conversation_results"]) > 0

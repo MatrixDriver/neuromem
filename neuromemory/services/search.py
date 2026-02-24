@@ -27,9 +27,9 @@ def _sanitize_bm25_query(query: str) -> str:
     (quotes, apostrophes, special operators) can cause parse errors.
     """
     # Remove characters that break Tantivy query parser
-    sanitized = query.replace("'", " ").replace("'", " ").replace("'", " ")
+    sanitized = query.replace("'", " ").replace("\u2018", " ").replace("\u2019", " ")
     # Remove other Tantivy special chars
-    for ch in ['"', '"', '"', '(', ')', '[', ']', '{', '}', '~', '^', '\\']:
+    for ch in ['"', '\u201c', '\u201d', '(', ')', '[', ']', '{', '}', '~', '^', '\\']:
         sanitized = sanitized.replace(ch, " ")
     # Collapse multiple spaces
     return " ".join(sanitized.split())
@@ -47,8 +47,11 @@ class SearchService:
         content: str,
         memory_type: str = "general",
         metadata: dict | None = None,
+        valid_from: datetime | None = None,
     ) -> Embedding:
         """Add a memory with its embedding vector."""
+        from datetime import timezone
+
         vector = await self._embedding.embed(content)
 
         record = Embedding(
@@ -57,6 +60,7 @@ class SearchService:
             embedding=vector,
             memory_type=memory_type,
             metadata_=metadata,
+            valid_from=valid_from or datetime.now(timezone.utc),
         )
         self.db.add(record)
         await self.db.flush()
@@ -73,6 +77,7 @@ class SearchService:
         query_embedding: list[float] | None = None,
         event_after: datetime | None = None,
         event_before: datetime | None = None,
+        as_of: datetime | None = None,
     ) -> list[dict]:
         """Hybrid search: vector similarity + BM25 keyword search, merged via RRF.
 
@@ -80,6 +85,8 @@ class SearchService:
             query_embedding: Optional pre-computed embedding to avoid recomputation
             event_after: Filter episodes by extracted_timestamp >= this datetime
             event_before: Filter episodes by extracted_timestamp <= this datetime
+            as_of: Time-travel query — return memories valid at this point in time.
+                When None, only returns currently valid memories (valid_until IS NULL).
         """
         if query_embedding is not None:
             query_vector = query_embedding
@@ -114,6 +121,16 @@ class SearchService:
         if event_before:
             filters += " AND extracted_timestamp <= :event_before"
             params["event_before"] = event_before
+
+        # Time-travel filter
+        if as_of is not None:
+            filters += (
+                " AND (valid_from IS NULL OR valid_from <= :as_of)"
+                " AND (valid_until IS NULL OR valid_until > :as_of)"
+            )
+            params["as_of"] = as_of
+        else:
+            filters += " AND valid_until IS NULL"
 
         # Hybrid search: RRF fusion of vector and BM25 results
         candidate_limit = limit * 2 if self._pg_search else limit * 4
@@ -205,6 +222,7 @@ class SearchService:
         event_after: datetime | None = None,
         event_before: datetime | None = None,
         exclude_types: list[str] | None = None,
+        as_of: datetime | None = None,
     ) -> list[dict]:
         """Three-factor scored search with BM25 hybrid: relevance x recency x importance.
 
@@ -217,6 +235,7 @@ class SearchService:
             query_embedding: Optional pre-computed embedding to avoid recomputation
             event_after: Filter episodes by extracted_timestamp >= this datetime
             event_before: Filter episodes by extracted_timestamp <= this datetime
+            as_of: Time-travel query — return memories valid at this point in time.
         """
         if query_embedding is not None:
             query_vector = query_embedding
@@ -249,6 +268,16 @@ class SearchService:
         if event_before:
             filters += " AND extracted_timestamp <= :event_before"
             params["event_before"] = event_before
+
+        # Time-travel filter
+        if as_of is not None:
+            filters += (
+                " AND (valid_from IS NULL OR valid_from <= :as_of)"
+                " AND (valid_until IS NULL OR valid_until > :as_of)"
+            )
+            params["as_of"] = as_of
+        else:
+            filters += " AND valid_until IS NULL"
 
         candidate_limit = limit * 2 if self._pg_search else limit * 4
 
