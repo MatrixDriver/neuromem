@@ -30,6 +30,7 @@ rpiv/
 evaluation/data/*.json
 evaluation/results/*.json
 evaluation/results/*.tmp
+evaluation/results/*.log
 
 # Worktrees
 .worktrees/
