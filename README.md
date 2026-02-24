@@ -1,8 +1,12 @@
 # NeuroMemory
 
-**AI Agent 记忆框架**
+**AI Agent 多层记忆框架**
 
-为 AI agent 开发者提供记忆管理能力。直接在 Python 程序中使用，无需部署服务器。
+为 AI agent 提供开箱即用的多层记忆体系。一次 `add_message` 调用自动并行提取四种记忆：
+**Fact**（持久事实）、**Episode**（带时间戳的情景记忆）、**Graph**（实体关系图谱）、**Insight**（后台异步 reflect 生成的行为模式洞察）。
+`recall()` 将四层记忆融合排序后直接返回，可零额外代码组装进 prompt。
+
+基于 PostgreSQL 构建的 Python 记忆库，充分利用 pgvector 向量检索、pg_search 全文检索等 PG 生态插件能力。
 
 ---
 
