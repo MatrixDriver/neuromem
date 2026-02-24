@@ -826,6 +826,12 @@ class NeuroMemory:
                 # Enrich content with metadata for LLM context
                 ts = r.get("extracted_timestamp")
                 ts_str = (ts.strftime("%Y-%m-%d") if hasattr(ts, "strftime") else str(ts)[:10]) if ts else None
+                # Fallback: use metadata timestamp/timestamp_original for episodes
+                if not ts_str and r.get("memory_type") == "episodic":
+                    meta_ts = (r.get("metadata") or {})
+                    ts_str = meta_ts.get("timestamp") or meta_ts.get("timestamp_original")
+                    if ts_str and len(ts_str) > 10:
+                        ts_str = ts_str[:10]  # Trim to YYYY-MM-DD
                 meta = r.get("metadata") or {}
                 emotion = meta.get("emotion") if isinstance(meta, dict) else None
                 sentiment_str = None
@@ -879,7 +885,7 @@ class NeuroMemory:
                     merged.append(entry)
 
         # Graph triples participate in unified ranking
-        # Use confidence directly as score (same 0~1 scale as cosine similarity)
+        # Use confidence as score, capped at 0.9 to avoid dominating vector results
         for triple in graph_results:
             subj = triple.get("subject", "")
             rel = triple.get("relation", "")
@@ -887,7 +893,7 @@ class NeuroMemory:
             triple_content = f"{subj} → {rel} → {obj}"
             if triple_content not in seen_contents:
                 seen_contents.add(triple_content)
-                base_score = float(triple.get("confidence", 0.5))
+                base_score = min(float(triple.get("confidence", 0.5)), 0.9)
                 merged.append({
                     "content": triple_content,
                     "score": round(base_score, 4),
