@@ -801,6 +801,13 @@ class NeuroMemory:
             if isinstance(r, Exception):
                 logger.warning("recall fetch[%d] failed: %s", i, r)
 
+        # Build graph triples for coverage boost
+        graph_triples = [
+            (t.get("subject", "").lower(), t.get("relation", ""), t.get("object", "").lower())
+            for t in graph_results
+            if t.get("subject") and t.get("object")
+        ]
+
         # Deduplicate by content
         seen_contents: set[str] = set()
         merged: list[dict] = []
@@ -835,6 +842,23 @@ class NeuroMemory:
                     # Facts/insights: timeless attributes, no date prefix needed
                     if sentiment_str:
                         entry["content"] = f"{content}. {sentiment_str}"
+
+                # Graph triple coverage boost
+                if graph_triples:
+                    boost = 1.0
+                    content_lower = content.lower()
+                    for subj, _rel, obj in graph_triples:
+                        subj_in = subj in content_lower
+                        obj_in = obj in content_lower
+                        if subj_in and obj_in:
+                            boost += 0.5
+                        elif subj_in or obj_in:
+                            boost += 0.2
+                    boost = min(boost, 2.0)
+                    if r.get("score") is not None:
+                        entry["score"] = round(r["score"] * boost, 4)
+                    entry["graph_boost"] = round(boost, 2)
+
                 merged.append(entry)
 
         # Merge conversation results when explicitly requested
@@ -844,6 +868,25 @@ class NeuroMemory:
                 if content and content not in seen_contents:
                     seen_contents.add(content)
                     merged.append({**r, "source": "conversation"})
+
+        # Graph triples participate in unified ranking
+        for triple in graph_results:
+            subj = triple.get("subject", "")
+            rel = triple.get("relation", "")
+            obj = triple.get("object", "")
+            triple_content = f"{subj} → {rel} → {obj}"
+            if triple_content not in seen_contents:
+                seen_contents.add(triple_content)
+                base_score = float(triple.get("confidence", 0.5))
+                merged.append({
+                    "content": triple_content,
+                    "score": round(base_score, 4),
+                    "source": "graph",
+                    "memory_type": "graph_fact",
+                })
+
+        # Sort by score descending for unified ranking
+        merged.sort(key=lambda x: x.get("score", 0), reverse=True)
 
         graph_context: list[str] = [
             f"{r.get('subject')} → {r.get('relation')} → {r.get('object')}"
