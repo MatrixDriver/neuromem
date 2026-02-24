@@ -2,11 +2,11 @@
 
 **AI Agent 多层记忆框架**
 
-为 AI agent 提供开箱即用的多层记忆体系。一次 `add_message` 调用自动并行提取四种记忆：
-**Fact**（持久事实）、**Episode**（带时间戳的情景记忆）、**Graph**（实体关系图谱）、**Insight**（后台异步 reflect 生成的行为模式洞察）。
-`recall()` 将四层记忆融合排序后直接返回，可零额外代码组装进 prompt。
+基于 PostgreSQL 构建的 Python 记忆库，为 AI agent 提供开箱即用的多层记忆。利用 PostgreSQL 生态 pgvector 向量检索、pg_search 全文检索、图检索、KV 检索等能力实现混合记忆检索。
 
-基于 PostgreSQL 构建的 Python 记忆库，充分利用 pgvector 向量检索、pg_search 全文检索等 PG 生态插件能力。
+- `add_message()` 自动并行提取四种记忆：**Fact**（持久事实）、**Episode**（带时间戳的情景记忆）、**Graph**（实体关系图谱）、**UserProfile**（用户画像）
+- `reflect()` 周期性自动异步提取 **Insight**（行为模式洞察）
+- `recall()` 将四层记忆融合排序后直接返回，可零额外代码组装进 prompt
 
 ---
 
