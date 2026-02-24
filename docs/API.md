@@ -1,8 +1,8 @@
 # NeuroMemory API 参考文档
 
-> **版本**: 0.3.0
+> **版本**: 0.4.x
 > **Python**: 3.12+
-> **最后更新**: 2026-02-21
+> **最后更新**: 2026-02-24
 
 ---
 
@@ -42,11 +42,10 @@ nm = NeuroMemory(
     llm: LLMProvider | None = None,
     storage: ObjectStorage | None = None,
     auto_extract: bool = True,
-    extraction: ExtractionStrategy | None = None,
     graph_enabled: bool = False,
     pool_size: int = 10,
     echo: bool = False,
-    reflection_interval: int = 0,
+    reflection_interval: int = 20,
 )
 ```
 
@@ -59,8 +58,7 @@ nm = NeuroMemory(
 | `llm` | `LLMProvider` | ❌ | LLM 提供者，用于自动提取和 `reflect()` |
 | `storage` | `ObjectStorage` | ❌ | 对象存储，用于文件管理（S3Storage） |
 | `auto_extract` | `bool` | ❌ | 是否自动提取记忆（每次 `add_message()` 时），默认 `True` |
-| `reflection_interval` | `int` | ❌ | 在 `auto_extract=True` 模式下，每 N 次提取后自动在后台运行 `reflect()`（0 = 禁用）。需要配置 `llm`。例如 `reflection_interval=10` 表示每 10 条用户消息触发一次后台 reflect，完全不阻塞对话流程。 |
-| `extraction` | `ExtractionStrategy` | ❌ | 自动记忆提取策略（策略模式，与 `auto_extract` 互斥） |
+| `reflection_interval` | `int` | ❌ | 每 N 次提取后自动在后台运行 `reflect()`（0 = 禁用，默认 `20`）。需要配置 `llm`。 |
 | `graph_enabled` | `bool` | ❌ | 是否启用图数据库（关系表实现），默认 False |
 | `pool_size` | `int` | ❌ | 数据库连接池大小，默认 10 |
 | `echo` | `bool` | ❌ | 是否输出 SQL 日志，默认 `False`（调试用） |
@@ -86,9 +84,8 @@ async with NeuroMemory(
     llm=OpenAILLM(api_key="sk-xxx", model="deepseek-chat"),
     auto_extract=False,  # 关闭自动提取
 ) as nm:
-    # 需要手动调用 reflect() 提取记忆
     await nm.conversations.add_message(user_id="alice", role="user", content="I work at Google")
-    await nm.reflect(user_id="alice")  # 手动提取 + 生成洞察
+    await nm.reflect(user_id="alice")  # 手动触发：提取记忆 + 生成洞察
 ```
 
 ---
@@ -365,6 +362,7 @@ result = await nm.recall(
     query: str,
     limit: int = 20,
     decay_rate: float | None = None,
+    include_conversations: bool = False,
 ) -> dict
 ```
 
@@ -376,6 +374,7 @@ result = await nm.recall(
 | `query` | `str` | - | 查询文本 |
 | `limit` | `int` | `20` | 返回结果数量 |
 | `decay_rate` | `float` | `86400*30` | 时间衰减率（秒），30 天 |
+| `include_conversations` | `bool` | `False` | 是否将原始对话片段合并进 `merged[]`（默认关闭，节省 token） |
 
 **返回格式**：
 
@@ -385,7 +384,7 @@ result = await nm.recall(
     "vector_results": [
         {
             "id": "uuid",
-            "content": "[2025-03-01 | sentiment: positive] 在 Google 工作",
+            "content": "在 Google 工作"  # fact: 无日期前缀；episodic: "2025-03-01: 去了北京. sentiment: excited",
             "memory_type": "fact",              # fact / episodic / insight / general
             "metadata": {
                 "importance": 8,               # 重要性评分 (1-10)
@@ -566,7 +565,7 @@ insights = await nm.search(
 
 ## 记忆管理 API 对比
 
-推荐使用 `reflect()` 进行记忆处理。`extract_memories()` 是底层方法，主要由 `ExtractionStrategy` 自动调用。
+推荐使用 `reflect()` 进行记忆处理。`extract_memories()` 是底层方法，由 `add_message()` 的 `auto_extract` 机制自动调用。
 
 ### reflect() - 记忆整理 ⭐ 推荐
 
@@ -894,7 +893,7 @@ await nm.conversations.close_session(
 ) -> None
 ```
 
-**关闭会话**，如果配置了 `ExtractionStrategy.on_session_close=True`，会自动触发记忆提取。
+**关闭会话**。
 
 ### nm.conversations.list_sessions()
 
@@ -1057,10 +1056,11 @@ node_id = await nm.graph.create_node(
 ```python
 from neuromemory.models.graph import NodeType
 
-NodeType.USER       # 用户
-NodeType.ENTITY     # 实体（公司、地点等）
-NodeType.TOPIC      # 主题
-NodeType.EVENT      # 事件
+NodeType.USER         # 用户
+NodeType.ENTITY       # 通用实体
+NodeType.ORGANIZATION # 组织/公司
+NodeType.LOCATION     # 地点
+NodeType.SKILL        # 技能
 ```
 
 **示例**：
@@ -1092,11 +1092,27 @@ await nm.graph.create_edge(
 **EdgeType 枚举**：
 
 ```python
-EdgeType.WORKS_AT        # 工作于
-EdgeType.INTERESTED_IN   # 感兴趣
-EdgeType.KNOWS           # 认识
-EdgeType.RELATED_TO      # 相关
-EdgeType.CUSTOM          # 自定义
+# Fact 关系
+EdgeType.WORKS_AT     # 工作于
+EdgeType.LIVES_IN     # 居住于
+EdgeType.HAS_SKILL    # 拥有技能
+EdgeType.STUDIED_AT   # 就读于
+EdgeType.KNOWS        # 认识
+EdgeType.USES         # 使用
+EdgeType.HOBBY        # 爱好
+EdgeType.OWNS         # 拥有
+EdgeType.SPEAKS       # 会说语言
+EdgeType.BORN_IN      # 出生于
+EdgeType.LOCATED_IN   # 位于
+# Episode 关系
+EdgeType.MET          # 见面
+EdgeType.ATTENDED     # 参加活动
+EdgeType.VISITED      # 访问地点
+EdgeType.OCCURRED_AT  # 发生地点
+# 通用
+EdgeType.RELATED_TO   # 相关
+EdgeType.MENTIONS     # 提及
+EdgeType.CUSTOM       # 自定义关系（properties["relation_name"] 存储原始名称）
 ```
 
 **示例**：
@@ -1222,8 +1238,8 @@ class CustomEmbedding(EmbeddingProvider):
 from neuromemory.providers.llm import LLMProvider
 
 class CustomLLM(LLMProvider):
-    async def generate(self, prompt: str, **kwargs) -> str:
-        """生成文本"""
+    async def chat(self, messages: list[dict], **kwargs) -> str:
+        """对话生成，messages 格式同 OpenAI: [{"role": "user", "content": "..."}]"""
         # 调用你的 LLM API
         return "generated text"
 ```
@@ -1277,27 +1293,23 @@ async def main():
     ) as nm:
         user_id = "alice"
 
-        # 1. 存储对话
+        # 1. 存储对话（自动提取记忆）
         await nm.conversations.add_message(
             user_id=user_id,
             role="user",
             content="我在 Google 工作，做后端开发，最近压力有点大"
         )
+        # → 自动提取: fact "在 Google 工作", episodic "最近压力有点大"
 
-        # 2. 提取记忆
-        messages = await nm.conversations.get_unextracted_messages(user_id=user_id)
-        stats = await nm.extract_memories(user_id=user_id, messages=messages)
-        print(f"提取了 {stats['facts_stored']} 条事实")
-
-        # 3. 召回记忆
+        # 2. 召回记忆
         result = await nm.recall(user_id=user_id, query="工作情况", limit=5)
         for mem in result["merged"]:
             print(f"[{mem['source']}] {mem['content']}")
 
-        # 4. 查询偏好（自动提取后存入 profile）
-        prefs = await nm.kv.get(user_id, "profile", "preferences")
+        # 3. 查询用户画像（自动提取后存入 profile）
+        prefs = await nm.kv.get(user_id, "profile", "interests")
 
-        # 5. 定期整理
+        # 4. 定期生成洞察（默认 reflection_interval=20 自动触发，也可手动调用）
         await nm.reflect(user_id=user_id)
 
 asyncio.run(main())

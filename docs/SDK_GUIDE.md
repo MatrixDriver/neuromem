@@ -1,7 +1,7 @@
 # NeuroMemory 使用指南
 
 > **Python 版本**: 3.12+
-> **最后更新**: 2026-02-21
+> **最后更新**: 2026-02-24
 
 ---
 
@@ -245,14 +245,14 @@ session_id, message_ids = await nm.conversations.add_messages_batch(
 
 ```python
 # 获取会话历史
-messages = await nm.conversations.get_history(
+messages = await nm.conversations.get_session_messages(
     user_id="alice",
     session_id="my_session_001",
     limit=50,
 )
 
 # 列出所有会话
-total, sessions = await nm.conversations.list_sessions(
+sessions = await nm.conversations.list_sessions(
     user_id="alice",
     limit=20,
 )
@@ -298,14 +298,14 @@ doc = await nm.files.create_from_text(
 
 ```python
 # 列出文件
-docs = await nm.files.list_documents(
+docs = await nm.files.list(
     user_id="alice",
     category="work",
     file_types=["pdf", "docx"],
 )
 
 # 获取单个文件
-doc = await nm.files.get_document(file_id=some_uuid)
+doc = await nm.files.get(file_id=some_uuid)
 
 # 删除文件（同时删除存储和数据库记录）
 await nm.files.delete(file_id=some_uuid)
@@ -333,16 +333,27 @@ await nm.files.delete(file_id=some_uuid)
 from neuromemory.models.graph import NodeType, EdgeType
 
 # 内置节点类型
-NodeType.USER      # 用户
-NodeType.MEMORY    # 记忆
-NodeType.TOPIC     # 主题
-NodeType.ENTITY    # 实体
+NodeType.USER         # 用户
+NodeType.ENTITY       # 通用实体
+NodeType.ORGANIZATION # 组织/公司
+NodeType.LOCATION     # 地点
+NodeType.SKILL        # 技能
 
-# 内置关系类型
-EdgeType.HAS_MEMORY     # 拥有记忆
-EdgeType.RELATED_TO     # 相关
-EdgeType.INTERESTED_IN  # 感兴趣
-EdgeType.MENTIONED_IN   # 被提及
+# 内置关系类型（Fact）
+EdgeType.WORKS_AT     # 工作于
+EdgeType.LIVES_IN     # 居住于
+EdgeType.HAS_SKILL    # 拥有技能
+EdgeType.STUDIED_AT   # 就读于
+EdgeType.KNOWS        # 认识
+EdgeType.HOBBY        # 爱好
+EdgeType.SPEAKS       # 会说语言
+# 内置关系类型（Episode）
+EdgeType.MET          # 见面
+EdgeType.ATTENDED     # 参加活动
+EdgeType.VISITED      # 访问地点
+# 通用
+EdgeType.RELATED_TO   # 相关
+EdgeType.CUSTOM       # 自定义
 ```
 
 ### 7.2 节点 CRUD
@@ -371,24 +382,24 @@ await nm.graph.delete_node("alice", NodeType.USER, "alice")
 # 创建关系
 edge = await nm.graph.create_edge(
     NodeType.USER, "alice",
-    EdgeType.INTERESTED_IN,
-    NodeType.TOPIC, "python",
+    EdgeType.WORKS_AT,
+    NodeType.ENTITY, "google",
     properties={"since": "2020"},
 )
 
 # 更新关系
 await nm.graph.update_edge(
     NodeType.USER, "alice",
-    EdgeType.INTERESTED_IN,
-    NodeType.TOPIC, "python",
-    {"level": "expert"},
+    EdgeType.WORKS_AT,
+    NodeType.ENTITY, "google",
+    {"role": "ML engineer"},
 )
 
 # 删除关系
 await nm.graph.delete_edge(
     NodeType.USER, "alice",
-    EdgeType.INTERESTED_IN,
-    NodeType.TOPIC, "python",
+    EdgeType.WORKS_AT,
+    NodeType.ENTITY, "google",
 )
 ```
 
@@ -398,7 +409,7 @@ await nm.graph.delete_edge(
 # 获取邻居
 neighbors = await nm.graph.get_neighbors(
     "alice", NodeType.USER, "alice",
-    edge_types=[EdgeType.INTERESTED_IN],
+    edge_types=[EdgeType.WORKS_AT],
     direction="out",
     limit=20,
 )
@@ -406,7 +417,7 @@ neighbors = await nm.graph.get_neighbors(
 # 查找路径
 path = await nm.graph.find_path(
     "alice", NodeType.USER, "alice",
-    NodeType.TOPIC, "machine-learning",
+    NodeType.ENTITY, "google",
     max_depth=3,
 )
 ```
@@ -415,7 +426,7 @@ path = await nm.graph.find_path(
 
 ## 8. 记忆提取
 
-需要配置 `LLMProvider`。从对话中自动提取事实、事件和关系，偏好存入用户画像。
+需要配置 `LLMProvider`。`add_message()` 默认 `auto_extract=True`，每条消息自动提取记忆。
 
 ### 8.1 基础用法
 
@@ -426,31 +437,32 @@ nm = NeuroMemory(
     database_url="...",
     embedding=SiliconFlowEmbedding(api_key="..."),
     llm=OpenAILLM(api_key="...", model="deepseek-chat"),
+    reflection_interval=20,  # 每 20 条消息后台自动 reflect（默认）
 )
 
-# 先录入对话
-await nm.conversations.add_messages_batch(
-    user_id="alice",
-    messages=[
-        {"role": "user", "content": "I just started working at Google as a ML engineer"},
-        {"role": "assistant", "content": "That's great!"},
-        {"role": "user", "content": "I prefer Python over Java for ML work"},
-    ],
+# add_message 自动提取记忆
+await nm.conversations.add_message(
+    user_id="alice", role="user",
+    content="I just started working at Google as a ML engineer"
 )
+# → 自动提取: fact "在 Google 担任 ML 工程师", profile.interests 更新
 
-# 提取记忆
-stats = await nm.extract_memories(user_id="alice")
+# reflect 生成洞察（默认自动触发，也可手动调用）
+result = await nm.reflect(user_id="alice")
 ```
 
-### 8.2 提取结果
+### 8.2 提取结果（add_message 返回后记忆立即可用）
 
 ```python
+# recall 可立即检索到刚提取的记忆
+result = await nm.recall(user_id="alice", query="Where does Alice work?")
+# result["merged"] 包含: fact "在 Google 担任 ML 工程师"
+
+# reflect 返回
 {
-    "facts_extracted": 1,         # 存入 embeddings（content: "在 Google 担任 ML 工程师"）
-    "episodes_extracted": 0,
-    "triples_extracted": 0,       # 存入图数据库
-    "messages_processed": 3,
-    "profile_updates": 1,         # 偏好等存入用户画像（profile）
+    "insights_generated": 1,      # 生成洞察数
+    "insights": [{"content": "...", "category": "pattern"}],
+    "emotion_profile": {...},
 }
 ```
 

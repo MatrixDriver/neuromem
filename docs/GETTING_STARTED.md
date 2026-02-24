@@ -1,7 +1,7 @@
 # NeuroMemory 快速开始指南
 
 > **预计时间**: 10 分钟
-> **最后更新**: 2026-02-21
+> **最后更新**: 2026-02-24
 
 ---
 
@@ -201,12 +201,12 @@ session_id, ids = await nm.conversations.add_messages_batch(
 )
 
 # 获取会话历史
-messages = await nm.conversations.get_history(
+messages = await nm.conversations.get_session_messages(
     user_id="alice", session_id=session_id
 )
 
 # 列出所有会话
-total, sessions = await nm.conversations.list_sessions(user_id="alice")
+sessions = await nm.conversations.list_sessions(user_id="alice")
 ```
 
 ### 4.3 文件管理
@@ -236,7 +236,7 @@ async with NeuroMemory(
     print(f"Uploaded: {doc.filename}, extracted text: {len(doc.extracted_text)} chars")
 
     # 列出文件
-    docs = await nm.files.list_documents(user_id="alice")
+    docs = await nm.files.list(user_id="alice")
 
     # 删除文件
     await nm.files.delete(user_id="alice", file_id=doc.id)
@@ -259,14 +259,14 @@ await nm.graph.create_node(
     NodeType.USER, "alice", properties={"name": "Alice", "age": 30}
 )
 await nm.graph.create_node(
-    NodeType.TOPIC, "python", properties={"name": "Python"}
+    NodeType.ENTITY, "google", properties={"name": "Google"}
 )
 
 # 创建关系
 await nm.graph.create_edge(
     NodeType.USER, "alice",
-    EdgeType.INTERESTED_IN,
-    NodeType.TOPIC, "python",
+    EdgeType.WORKS_AT,
+    NodeType.ENTITY, "google",
 )
 
 # 查询邻居
@@ -275,14 +275,14 @@ neighbors = await nm.graph.get_neighbors(NodeType.USER, "alice")
 # 查找路径
 path = await nm.graph.find_path(
     NodeType.USER, "alice",
-    NodeType.TOPIC, "python",
+    NodeType.ENTITY, "google",
     max_depth=3,
 )
 ```
 
 ### 4.5 记忆提取（需要 LLM）
 
-从对话中自动提取记忆：
+配置 `llm` 后，`add_message()` 默认自动提取记忆（`auto_extract=True`）：
 
 ```python
 from neuromemory import OpenAILLM
@@ -291,22 +291,19 @@ async with NeuroMemory(
     database_url="...",
     embedding=SiliconFlowEmbedding(api_key="..."),
     llm=OpenAILLM(api_key="...", model="deepseek-chat"),
+    reflection_interval=20,  # 每 20 条消息后台自动 reflect，生成洞察（默认值）
 ) as nm:
-    # 先添加对话
-    await nm.conversations.add_messages_batch(
-        user_id="alice",
-        messages=[
-            {"role": "user", "content": "I just started working at Google"},
-            {"role": "assistant", "content": "Congratulations!"},
-            {"role": "user", "content": "I love Python and machine learning"},
-        ],
+    # add_message 自动提取记忆
+    await nm.conversations.add_message(
+        user_id="alice", role="user",
+        content="I just started working at Google as a ML engineer"
     )
+    # → 自动提取: fact "在 Google 担任 ML 工程师", 偏好存入 profile
 
-    # 自动提取记忆
-    stats = await nm.extract_memories(user_id="alice")
-    print(f"Extracted: {stats['facts_extracted']} facts, "
-          f"{stats['episodes_extracted']} episodes, "
-          f"{stats['triples_extracted']} triples")
+    # 召回记忆（立即可用）
+    result = await nm.recall(user_id="alice", query="Where does Alice work?")
+    for mem in result["merged"]:
+        print(f"[{mem['score']:.2f}] {mem['content']}")
 ```
 
 ---
