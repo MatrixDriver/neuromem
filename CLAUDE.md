@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-NeuroMemory (v0.5.1) 是一个 **Python 记忆管理框架**，为 AI agent 开发者提供记忆存储、检索和推理能力。开发者直接 `from neuromemory import NeuroMemory` 在自己程序中使用，无需部署服务器。已发布到 PyPI。
+NeuroMemory (v0.6.3) 是一个 **Python 记忆管理框架**，为 AI agent 开发者提供记忆存储、检索和推理能力。开发者直接 `from neuromemory import NeuroMemory` 在自己程序中使用，无需部署服务器。已发布到 PyPI。
 
 **核心架构**：
 - **Python 框架** (`neuromemory/`)：直接在 agent 程序中使用的库
@@ -147,7 +147,7 @@ async with NeuroMemory(
     reflection_interval=20,  # 每 20 条 user 消息后台自动 reflect
 ) as nm:
     # 对话 → 自动提取 facts/episodes/relations
-    await nm.conversations.add_message(user_id="u1", role="user", content="I work at Google")
+    await nm.add_message(user_id="u1", role="user", content="I work at Google")
 
     # 三因子召回（向量 + 图谱 + 时序，并行执行）
     result = await nm.recall(user_id="u1", query="workplace", include_conversations=False)
@@ -170,7 +170,7 @@ async with NeuroMemory(
 ## 核心工作流
 
 ```
-add_message(role="user")
+nm.add_message(role="user")
   ├─ 存储到 conversations 表
   ├─ 后台生成 embedding (asyncio.create_task)
   ├─ auto_extract=True → 后台 LLM 提取 facts/episodes/relations

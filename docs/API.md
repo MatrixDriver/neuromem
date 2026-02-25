@@ -1,6 +1,6 @@
 # NeuroMemory API 参考文档
 
-> **版本**: 0.4.x
+> **版本**: 0.6.x
 > **Python**: 3.12+
 > **最后更新**: 2026-02-24
 
@@ -56,6 +56,10 @@ nm = NeuroMemory(
 | `graph_enabled` | `bool` | ❌ | 是否启用图数据库（关系表实现），默认 False |
 | `pool_size` | `int` | ❌ | 数据库连接池大小，默认 10 |
 | `echo` | `bool` | ❌ | 是否输出 SQL 日志，默认 `False`（调试用） |
+| `on_extraction` | `Callable` | ❌ | 提取完成回调，接收 dict（含 user_id, session_id, duration, facts_extracted 等）。支持同步和异步函数。 |
+| `extraction` | `ExtractionStrategy` | ❌ | 自定义提取触发策略（替代默认的每条消息自动提取），详见 ExtractionStrategy 类。 |
+
+> **注意**：`on_extraction`、`extraction`、`auto_extract`、`reflection_interval`、`graph_enabled` 等配置支持运行时动态修改，详见 [动态配置](#动态配置)。
 
 **示例**：
 
@@ -68,7 +72,7 @@ async with NeuroMemory(
     auto_extract=True,  # 默认，每次 add_message 自动提取
 ) as nm:
     # 每次 add_message 都会自动提取记忆
-    await nm.conversations.add_message(user_id="alice", role="user", content="I work at Google")
+    await nm.add_message(user_id="alice", role="user", content="I work at Google")
     # → 自动提取: fact: "在 Google 工作"
 
 # 手动模式：关闭自动提取
@@ -78,8 +82,19 @@ async with NeuroMemory(
     llm=OpenAILLM(api_key="sk-xxx", model="deepseek-chat"),  # 必需
     auto_extract=False,  # 关闭自动提取
 ) as nm:
-    await nm.conversations.add_message(user_id="alice", role="user", content="I work at Google")
+    await nm.add_message(user_id="alice", role="user", content="I work at Google")
     await nm.reflect(user_id="alice")  # 手动触发：提取记忆 + 生成洞察
+```
+
+### 动态配置
+
+以下配置支持运行时动态修改：
+
+```python
+nm.reflection_interval = 10      # 修改反思触发间隔
+nm.auto_extract = False          # 暂停自动提取
+nm.graph_enabled = True          # 启用图谱
+nm.on_extraction = my_callback   # 挂载/替换提取完成回调
 ```
 
 ---
@@ -97,7 +112,7 @@ NeuroMemory 的公共 API 围绕三个核心操作：
 **示例**：
 ```python
 # 1. 对话驱动（推荐），默认自动提取
-await nm.conversations.add_message(user_id="alice", role="user",
+await nm.add_message(user_id="alice", role="user",
     content="我在 Google 工作，做后端开发")
 # → 自动提取: fact: "在 Google 工作", fact: "做后端开发"
 # → 自动标注: importance=8, emotion={valence: 0.3, arousal: 0.2}
@@ -119,10 +134,12 @@ result = await nm.reflect(user_id="alice")
 
 ### add_message() - 添加对话消息
 
-**最常用的 API**，用于存储用户和 assistant 的对话消息。**v0.2.0 起默认自动提取记忆**，这是构建对话 agent 的核心操作。
+**最常用的 API**，用于存储用户和 assistant 的对话消息。**默认自动提取记忆**，这是构建对话 agent 的核心操作。
+
+> **推荐**: 使用 `nm.add_message()` 快捷方式，等价于 `nm.conversations.add_message()`。
 
 ```python
-message = await nm.conversations.add_message(
+message = await nm.add_message(
     user_id: str,
     role: str,
     content: str,
@@ -131,7 +148,7 @@ message = await nm.conversations.add_message(
 ) -> ConversationMessage
 ```
 
-**行为变化（v0.2.0）**：
+**行为说明**：
 - 当 `auto_extract=True`（默认）时，每次调用会自动提取记忆到记忆库
 - 提取的记忆立即可通过 `recall()` 检索
 - 如需关闭自动提取，初始化时设置 `auto_extract=False`
@@ -148,11 +165,11 @@ message = await nm.conversations.add_message(
 
 **返回**：`ConversationMessage` 对象，包含 `id`, `session_id`, `role`, `content`, `created_at`
 
-**典型使用流程（v0.2.0）**：
+**典型使用流程**：
 
 ```python
 # 1. 用户发送消息（自动提取记忆）
-await nm.conversations.add_message(
+await nm.add_message(
     user_id="alice",
     role="user",
     content="我在 Google 工作，做后端开发"
@@ -169,7 +186,7 @@ reply = your_llm.generate(
 )
 
 # 4. 存储 assistant 回复（自动提取记忆）
-await nm.conversations.add_message(
+await nm.add_message(
     user_id="alice",
     role="assistant",
     content=reply
@@ -183,7 +200,7 @@ await nm.conversations.add_message(
 
 | 场景 | 说明 | 代码示例 |
 |------|------|---------|
-| **聊天机器人** | 存储用户和 bot 的每轮对话 | `await nm.conversations.add_message(user_id, "user", input)` |
+| **聊天机器人** | 存储用户和 bot 的每轮对话 | `await nm.add_message(user_id, "user", input)` |
 | **客服系统** | 记录客服与用户的完整对话历史 | 每次对话都调用 `add_message()` |
 | **AI 导师** | 追踪学生的学习对话，分析进度 | 存储所有问答，定期 `reflect()` |
 | **个人助手** | 构建长期对话记忆，理解用户习惯 | 结合 `recall()` 提供个性化回复 |
@@ -204,7 +221,7 @@ session_id, msg_ids = await nm.conversations.add_messages_batch(
 
 **注意事项**：
 - 每次对话都应该存储（user 和 assistant 消息）
-- **v0.2.0**: 自动记忆提取需要配置 `llm` 参数（`auto_extract=True` 默认开启）
+- 自动记忆提取需要配置 `llm` 参数（`auto_extract=True` 默认开启）
 - 可以通过 `session_id` 组织多轮对话
 - 更多对话管理 API 见 [对话管理（完整 API）](#对话管理完整-api)
 
@@ -365,7 +382,7 @@ print(f"图检索: {len(result['graph_results'])} 条")
 
 ### reflect() - 记忆整理
 
-**v0.2.0 更新**：专注于洞察生成和情感画像，基础记忆提取已由 `add_message()` 自动完成。
+专注于洞察生成和情感画像，基础记忆提取已由 `add_message()` 自动完成。
 
 ```python
 result = await nm.reflect(
@@ -385,10 +402,6 @@ result = await nm.reflect(
 
 ```python
 {
-    "conversations_processed": 0,     # v0.2.0: 基础提取已由 add_message 完成
-    "facts_added": 0,                # v0.2.0: 不再重复提取
-    "preferences_updated": 0,         # v0.2.0: 偏好存入 profile
-    "relations_added": 0,             # v0.2.0: 不再重复提取
     "insights_generated": 2,          # 生成洞察数
     "insights": [                     # 洞察内容
         {"content": "用户是技术从业者，关注后端开发", "category": "pattern"},
@@ -402,18 +415,18 @@ result = await nm.reflect(
 }
 ```
 
-**工作流程（v0.2.0）**：
+**工作流程**：
 
 1. **提炼洞察**：分析近期记忆（已由 `add_message()` 提取），生成高层理解
    - 行为模式（pattern）："用户倾向于晚上工作"
    - 阶段总结（summary）："用户近期在准备跳槽"
 2. **更新画像**：整合情感数据，更新用户情感画像
 
-**示例（v0.2.0）**：
+**示例**：
 
 ```python
 # 日常使用：add_message 自动提取 + 定期 reflect 生成洞察
-await nm.conversations.add_message(user_id="alice", role="user", content="我在 Google 工作")
+await nm.add_message(user_id="alice", role="user", content="我在 Google 工作")
 # → 自动提取: fact: "在 Google 工作"
 
 # 定期调用 reflect（如每天、每周）
@@ -425,6 +438,37 @@ for insight in result["insights"]:
     print(f"[{insight['category']}] {insight['content']}")
 
 ```
+
+---
+
+### on_extraction 回调
+
+每次记忆提取完成后的通知回调，用于统计提取速度、监控等：
+
+```python
+def on_extraction(stats):
+    print(f"提取完成: {stats['duration']}s, "
+          f"facts={stats['facts_extracted']}, "
+          f"episodes={stats['episodes_extracted']}")
+
+async with NeuroMemory(
+    ...,
+    on_extraction=on_extraction,  # 支持 sync 和 async 函数
+) as nm:
+    await nm.add_message(user_id="alice", role="user", content="...")
+```
+
+**回调参数** (dict):
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `user_id` | `str` | 用户 ID |
+| `session_id` | `str` | 会话 ID |
+| `duration` | `float` | 提取耗时（秒） |
+| `facts_extracted` | `int` | 提取的事实数 |
+| `episodes_extracted` | `int` | 提取的情景数 |
+| `triples_extracted` | `int` | 提取的图三元组数 |
+| `messages_processed` | `int` | 处理的消息数 |
 
 ---
 
@@ -540,6 +584,8 @@ await nm.kv.batch_set("alice", "config", {
 ---
 
 ## 对话管理
+
+> **推荐**: 日常使用 `nm.add_message()` 快捷方式即可，等价于 `nm.conversations.add_message()`。以下为完整的对话管理 API。
 
 ### nm.conversations.add_message()
 
@@ -1037,7 +1083,7 @@ async def main():
         user_id = "alice"
 
         # 1. 存储对话（自动提取记忆）
-        await nm.conversations.add_message(
+        await nm.add_message(
             user_id=user_id,
             role="user",
             content="我在 Google 工作，做后端开发，最近压力有点大"

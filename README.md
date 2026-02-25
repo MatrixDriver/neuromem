@@ -116,7 +116,7 @@ async def main():
         auto_extract=True,  # 默认启用，像 mem0 那样实时提取记忆
     ) as nm:
         # 1. 存储对话消息 → 自动提取记忆（facts/episodes/relations）
-        await nm.conversations.add_message(
+        await nm.add_message(
             user_id="alice", role="user",
             content="I work at ABC Company as a software engineer"
         )

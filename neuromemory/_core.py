@@ -52,7 +52,6 @@ class ExtractionStrategy:
     idle_timeout: float = 600
     on_session_close: bool = True
     on_shutdown: bool = True
-    reflection_interval: int = 20  # Trigger reflection every N extractions (0 = disabled)
 
 
 class KVFacade:
@@ -472,8 +471,7 @@ class NeuroMemory:
         self._msg_counts: dict[tuple[str, str], int] = {}
         self._idle_tasks: dict[tuple[str, str], asyncio.Task] = {}
         self._active_sessions: set[tuple[str, str]] = set()
-        self._extraction_counts: dict[str, int] = {}  # user_id -> count (ExtractionStrategy mode)
-        self._reflect_counts: dict[str, int] = {}      # user_id -> count (reflection_interval mode)
+        self._reflect_counts: dict[str, int] = {}      # user_id -> count for reflection_interval
         self._bg_tasks: list[asyncio.Task] = []        # background reflect tasks (awaited on close)
 
         # Embedding cache for query deduplication (reduces API calls)
@@ -506,6 +504,59 @@ class NeuroMemory:
 
         if storage:
             self.files = FilesFacade(self._db, self._embedding, storage)
+
+    async def add_message(
+        self,
+        user_id: str,
+        role: str,
+        content: str,
+        session_id: str | None = None,
+        metadata: dict | None = None,
+    ):
+        """Add a conversation message (shortcut for conversations.add_message)."""
+        return await self.conversations.add_message(
+            user_id, role, content, session_id, metadata,
+        )
+
+    # -- Dynamic configuration properties --
+
+    @property
+    def reflection_interval(self) -> int:
+        return self._reflection_interval
+
+    @reflection_interval.setter
+    def reflection_interval(self, value: int) -> None:
+        self._reflection_interval = value
+        # Update _on_extraction_done callback on conversations facade
+        self.conversations._on_extraction_done = (
+            self._maybe_trigger_reflect if value > 0 and self._llm else None
+        )
+
+    @property
+    def auto_extract(self) -> bool:
+        return self._auto_extract
+
+    @auto_extract.setter
+    def auto_extract(self, value: bool) -> None:
+        self._auto_extract = value
+        self.conversations._auto_extract = value
+
+    @property
+    def graph_enabled(self) -> bool:
+        return self._graph_enabled
+
+    @graph_enabled.setter
+    def graph_enabled(self, value: bool) -> None:
+        self._graph_enabled = value
+        self.conversations._graph_enabled = value
+
+    @property
+    def on_extraction(self) -> Callable[[dict], Any] | None:
+        return self._on_extraction
+
+    @on_extraction.setter
+    def on_extraction(self, value: Callable[[dict], Any] | None) -> None:
+        self._on_extraction = value
 
     async def init(self) -> None:
         """Initialize database tables and optional storage."""
@@ -675,19 +726,9 @@ class NeuroMemory:
                 except Exception as e:
                     logger.warning("on_extraction callback error: %s", e)
 
-            # Check if reflection should be triggered
-            if (
-                self._extraction
-                and self._extraction.reflection_interval > 0
-                and self._llm
-            ):
-                self._extraction_counts[user_id] = (
-                    self._extraction_counts.get(user_id, 0) + 1
-                )
-                if self._extraction_counts[user_id] >= self._extraction.reflection_interval:
-                    self._extraction_counts[user_id] = 0
-                    # 后台异步执行 reflect，不阻塞当前对话流程
-                    await self.reflect(user_id, background=True)
+            # Trigger reflection (unified: both auto_extract and ExtractionStrategy paths)
+            if self._reflection_interval > 0 and self._llm:
+                await self._maybe_trigger_reflect(user_id)
 
         except Exception as e:
             logger.error("Auto-extraction failed: user=%s session=%s error=%s",

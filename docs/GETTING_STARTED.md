@@ -23,7 +23,7 @@
 - **内存**: 至少 4GB RAM
 
 ```bash
-python --version   # 3.10+
+python --version   # 3.12+
 docker --version   # 20.0+
 ```
 
@@ -92,31 +92,26 @@ NeuroMemory 需要 Embedding 服务将文本转为向量。支持两种 Provider
 
 ```python
 import asyncio
-from neuromemory import NeuroMemory, SiliconFlowEmbedding
+from neuromemory import NeuroMemory, SiliconFlowEmbedding, OpenAILLM
 
 async def main():
-    # 初始化
-    nm = NeuroMemory(
+    async with NeuroMemory(
         database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
         embedding=SiliconFlowEmbedding(api_key="your-siliconflow-key"),
-    )
-    await nm.init()
-
-    try:
-        # 添加记忆
-        await nm.add_memory(
+        llm=OpenAILLM(api_key="your-llm-key", model="deepseek-chat"),
+    ) as nm:
+        # 添加对话消息（自动提取记忆）
+        await nm.add_message(
             user_id="alice",
+            role="user",
             content="I work at ABC Company as a software engineer",
-            memory_type="fact",
         )
-        print("Added memory")
+        print("Message added, memories auto-extracted")
 
-        # 语义检索
-        results = await nm.search(user_id="alice", query="Where does Alice work?")
-        for r in results:
-            print(f"  [{r['similarity']:.2f}] {r['content']}")
-    finally:
-        await nm.close()
+        # 混合检索
+        result = await nm.recall(user_id="alice", query="Where does Alice work?")
+        for r in result["merged"]:
+            print(f"  [{r['score']:.2f}] {r['content']}")
 
 asyncio.run(main())
 ```
@@ -132,23 +127,24 @@ python demo.py
 async with NeuroMemory(
     database_url="postgresql+asyncpg://neuromemory:neuromemory@localhost:5432/neuromemory",
     embedding=SiliconFlowEmbedding(api_key="your-key"),
+    llm=OpenAILLM(api_key="your-llm-key", model="deepseek-chat"),
 ) as nm:
-    await nm.add_memory(user_id="alice", content="I love Python")
-    results = await nm.search(user_id="alice", query="programming")
+    await nm.add_message(user_id="alice", role="user", content="I love Python")
+    result = await nm.recall(user_id="alice", query="programming")
     # 退出 with 块时自动关闭连接
 ```
 
 ### 3.3 使用 OpenAI Embedding
 
 ```python
-from neuromemory import NeuroMemory, OpenAIEmbedding
+from neuromemory import NeuroMemory, OpenAIEmbedding, OpenAILLM
 
 async with NeuroMemory(
     database_url="...",
     embedding=OpenAIEmbedding(api_key="your-openai-key"),
+    llm=OpenAILLM(api_key="your-llm-key", model="deepseek-chat"),
 ) as nm:
-    # 使用方式完全相同
-    await nm.add_memory(user_id="alice", content="Hello world")
+    await nm.add_message(user_id="alice", role="user", content="Hello world")
 ```
 
 ---
@@ -186,7 +182,7 @@ await nm.kv.delete("alice", "config", "language")
 
 ```python
 # 添加单条消息
-msg = await nm.conversations.add_message(
+msg = await nm.add_message(
     user_id="alice", role="user", content="Hello!"
 )
 print(f"Session: {msg.session_id}")
@@ -294,7 +290,7 @@ async with NeuroMemory(
     reflection_interval=20,  # 每 20 条消息后台自动 reflect，生成洞察（默认值）
 ) as nm:
     # add_message 自动提取记忆
-    await nm.conversations.add_message(
+    await nm.add_message(
         user_id="alice", role="user",
         content="I just started working at Google as a ML engineer"
     )

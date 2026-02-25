@@ -67,7 +67,7 @@ async with NeuroMemory(
     embedding=SiliconFlowEmbedding(api_key="..."),
     llm=OpenAILLM(api_key="...", model="deepseek-chat"),
 ) as nm:
-    await nm.conversations.add_message(user_id="alice", role="user", content="Hello")
+    await nm.add_message(user_id="alice", role="user", content="Hello")
     # 自动调用 init() 和 close()
 ```
 
@@ -108,6 +108,10 @@ nm = NeuroMemory(
 | llm | LLMProvider | 是 | LLM 服务（记忆提取和反思） |
 | storage | ObjectStorage | 否 | 文件存储（文件功能需要） |
 | pool_size | int | 否 | 连接池大小（默认 10） |
+| auto_extract | bool | 否 | 自动提取记忆（默认 True） |
+| graph_enabled | bool | 否 | 启用图数据库（默认 False） |
+| reflection_interval | int | 否 | 每 N 次提取后自动 reflect（默认 20，0 = 禁用） |
+| on_extraction | Callable | 否 | 提取完成回调 |
 
 ---
 
@@ -119,7 +123,7 @@ nm = NeuroMemory(
 
 ```python
 # 存储对话消息，自动提取记忆（facts/episodes/relations）
-await nm.conversations.add_message(
+await nm.add_message(
     user_id="alice",
     role="user",
     content="I work at ABC Company as a software engineer",
@@ -210,7 +214,7 @@ await nm.kv.batch_set("alice", "config", {
 
 ```python
 # 单条消息（自动生成 session_id）
-msg = await nm.conversations.add_message(
+msg = await nm.add_message(
     user_id="alice",
     role="user",
     content="Hello!",
@@ -218,7 +222,7 @@ msg = await nm.conversations.add_message(
 print(msg.session_id)  # session_xxxx
 
 # 指定 session
-msg = await nm.conversations.add_message(
+msg = await nm.add_message(
     user_id="alice",
     role="assistant",
     content="Hi! How can I help?",
@@ -440,7 +444,7 @@ nm = NeuroMemory(
 )
 
 # add_message 自动提取记忆
-await nm.conversations.add_message(
+await nm.add_message(
     user_id="alice", role="user",
     content="I just started working at Google as a ML engineer"
 )
