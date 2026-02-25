@@ -22,6 +22,7 @@
 | 16 | 02-23 | 后台异步reflect（reflection_interval=20，每20条消息触发）、去掉召回原始对话消息 | 0.804 | +1.5% |
 | 17 | 02-23 | GRAPH_ENABLED=1（图谱三元组提取+结构化关系召回）、图谱显示优化（UUID→可读名称，CUSTOM→原始关系词） | 0.790 | -3.3% |
 | 18 | 02-24 | 时间语义分拆（facts/timeline分栏）、Level4时间戳fallback、fact双语格式、去重增量reflect、concept节点过滤 | 0.792 | -3.1% |
+| 19 | 02-25 | 提取状态追踪（pending/done/failed）、失败重试API、清空重提取全部消息（0失败 vs R18 581失败） | 0.799 | -2.2% |
 
 > 累计提升：0.125 → 0.817（**+554%**）
 
@@ -43,6 +44,8 @@
 | R14→R17 变化 | -0.042 | -0.011 | +0.022 | -0.021 | -0.027 |
 | 18 (时间语义分拆+fact格式+reflect去重) | 0.773 | 0.757 | 0.807 | 0.842 | 0.792 |
 | R14→R18 变化 | -0.056 | -0.009 | -0.004 | +0.031 | -0.025 |
+| 19 (提取状态追踪+清空重提取) | 0.812 | 0.725 | 0.905 | 0.807 | 0.799 |
+| R14→R19 变化 | -0.017 | -0.041 | +0.094 | -0.036 | -0.018 |
 
 > R11 分类数据部分为估算（commit message 仅记录 Temporal +0.198、Multi-Hop +0.049）
 
@@ -155,6 +158,28 @@
 
 **注意**：本轮 ingest 更完整（0 写入失败 vs R13 存在 BM25 并发损坏），共写入 14107 条记忆（含 693 条 insights），耗时 2h20min（reflect 约占 1h）。
 
+### 第19轮：提取状态追踪 + 清空重提取（02-25）
+
+| 改进 | 说明 |
+|------|------|
+| 提取状态追踪 | `extracted: bool` → `extraction_status: str`（pending/done/failed），新增 `extraction_error`、`extraction_retries` 字段 |
+| 失败重试 API | `retry_failed_extractions(user_id, max_retries=3)` 公共方法，自动重试失败的提取 |
+| 后台任务状态标记 | `_extract_single_message_async` 成功标记 done，失败标记 failed + 记录错误 |
+| 清空重提取 | 清空 embeddings 表，重新提取全部 5882 条 user 消息，0 失败（vs R18 约 581 次失败） |
+| 评测 pipeline 集成 | locomo ingest 完成后自动调用 `retry_failed_extractions` |
+
+效果：Overall 0.799（vs R18 0.792，+0.9%）。记忆数 11267（vs R18 8708，+29%）。Open-Domain 显著提升（0.807→0.905，+12.1%），但 Temporal 下降（0.757→0.725，-4.2%）。
+
+**分析**：本轮主要是工程改进（提取可靠性），非算法优化。更多记忆对 Open-Domain 有帮助（更全面的事实覆盖），但 Temporal 下降可能与 reflect 缺失有关（本轮清空重提取后未跑 reflect，缺少 insight 记忆）。
+
+| 指标 | R18 (8708 memories) | R19 (11267 memories) | 变化 |
+|------|:---:|:---:|:---:|
+| F1 | — | 0.256 | — |
+| BLEU-1 | — | 0.204 | — |
+| Judge | 0.792 | 0.799 | +0.9% |
+| 记忆数 | 8708 | 11267 | +29% |
+| 提取失败 | ~581 | 0 | -100% |
+
 ## 尝试但回退的实验
 
 | 实验 | 测试结果 | 回退原因 |
@@ -178,3 +203,5 @@
 - **insight 有效**：消融实验证明 insight 贡献 +2.3% Overall，Multi-Hop 贡献最大（+3.1%），应保留
 - **图谱（GRAPH_ENABLED）**：R17 证明默认开启有害，暂不启用
 - **原始对话消息召回**：R16 去掉后分数未明显变化，暂不恢复；`include_conversations` 开关已实现供需要时使用
+- **答案冗长拖低 F1/BLEU**：R19 分析发现预测平均 76 字符 vs gold 30 字符（2.6x），94 个 case gold<20 字符但预测>100 字符；调整 answer prompt 要求简洁直答可显著提升 F1/BLEU
+- **R19 缺少 reflect**：清空重提取后未跑 reflect，缺少 insight 记忆，可能是 Temporal 下降原因；下次应在重提取后补跑 reflect
