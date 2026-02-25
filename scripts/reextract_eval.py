@@ -57,6 +57,8 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--resume", action="store_true",
+                        help="Skip clearing embeddings, only extract pending messages")
     args = parser.parse_args()
 
     cfg = EvalConfig()
@@ -65,12 +67,12 @@ async def main():
     nm = create_nm(cfg)
     await nm.init()
 
-    from sqlalchemy import text, select, func
+    from sqlalchemy import and_, text, select, func
     from neuromemory.models.conversation import Conversation
     from neuromemory.models.memory import Embedding
     from neuromemory.services.conversation import ConversationService
 
-    if not args.dry_run:
+    if not args.dry_run and not args.resume:
         # Clear all embeddings
         async with nm._db.session() as session:
             result = await session.execute(text("DELETE FROM embeddings"))
@@ -97,11 +99,15 @@ async def main():
             logger.info("Reset extraction_status for %d messages", result.rowcount)
             await session.commit()
 
-    # Step 2: Get all user messages grouped by user
+    # Step 2: Get pending user messages
     async with nm._db.session() as session:
+        conditions = [
+            Conversation.role == "user",
+            Conversation.extraction_status == "pending",
+        ]
         result = await session.execute(
             select(Conversation)
-            .where(Conversation.role == "user")
+            .where(and_(*conditions))
             .order_by(Conversation.user_id, Conversation.created_at)
         )
         all_msgs = list(result.scalars().all())
