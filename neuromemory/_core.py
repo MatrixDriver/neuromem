@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from neuromemory.db import Database
 from neuromemory.providers.embedding import EmbeddingProvider
@@ -441,12 +442,17 @@ class NeuroMemory:
         pool_size: int = 10,
         echo: bool = False,
         reflection_interval: int = 20,
+        on_extraction: Callable[[dict], Any] | None = None,
     ):
         """
         Args:
             reflection_interval: Trigger background reflect() every N user messages per user.
                 Default 20: runs reflect in the background after every 20 user messages.
                 0 = disabled. Never blocks add_message(). Requires llm.
+            on_extraction: Optional callback invoked after each successful memory extraction.
+                Receives a dict with keys: user_id, session_id, duration, facts_extracted,
+                episodes_extracted, triples_extracted, messages_processed.
+                Can be sync or async.
         """
         # Set embedding dimensions before any model import
         import neuromemory.models as _models
@@ -460,6 +466,7 @@ class NeuroMemory:
         self._auto_extract = auto_extract
         self._graph_enabled = graph_enabled
         self._reflection_interval = reflection_interval
+        self._on_extraction = on_extraction
 
         # Extraction state tracking
         self._msg_counts: dict[tuple[str, str], int] = {}
@@ -639,15 +646,34 @@ class NeuroMemory:
             )
             if not messages:
                 return
+            t0 = time.monotonic()
             stats = await self._extract_memories(user_id, messages)
+            duration = time.monotonic() - t0
             logger.info(
                 "Auto-extracted memories: user=%s session=%s "
-                "facts=%d episodes=%d msgs=%d",
+                "facts=%d episodes=%d msgs=%d duration=%.3fs",
                 user_id, session_id,
                 stats["facts_extracted"],
                 stats["episodes_extracted"],
                 stats["messages_processed"],
+                duration,
             )
+
+            if self._on_extraction:
+                try:
+                    result = self._on_extraction({
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "duration": round(duration, 3),
+                        "facts_extracted": stats["facts_extracted"],
+                        "episodes_extracted": stats["episodes_extracted"],
+                        "triples_extracted": stats["triples_extracted"],
+                        "messages_processed": stats["messages_processed"],
+                    })
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as e:
+                    logger.warning("on_extraction callback error: %s", e)
 
             # Check if reflection should be triggered
             if (

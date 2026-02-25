@@ -854,3 +854,84 @@ class TestRecallFullPipeline:
         # Should have memories from both rounds
         recall_result = await nm_with_llm.recall(user_id=user_id, query="Google 北京", limit=10)
         assert len(recall_result["merged"]) >= 2
+
+    @pytest.mark.asyncio
+    async def test_on_extraction_callback(self, mock_embedding):
+        """on_extraction callback should be invoked with correct stats after extraction."""
+        llm = MockLLMProvider(response="""```json
+{
+  "facts": [
+    {"content": "在 Google 工作", "category": "work", "confidence": 0.98, "importance": 8}
+  ],
+  "episodes": [],
+  "triples": [],
+  "profile_updates": {}
+}
+```""")
+        callback_data = []
+        instance = NeuroMemory(
+            database_url=TEST_DATABASE_URL,
+            embedding=mock_embedding,
+            llm=llm,
+            on_extraction=lambda stats: callback_data.append(stats),
+        )
+        await instance.init()
+        try:
+            user_id = "callback_u1"
+            await instance.conversations.add_message(
+                user_id=user_id, role="user", content="我在 Google 工作",
+            )
+            messages = await instance.conversations.get_unextracted_messages(user_id)
+            # Use _do_extraction which triggers the callback
+            await instance._do_extraction(user_id, messages[0].session_id)
+
+            assert len(callback_data) == 1
+            stats = callback_data[0]
+            assert stats["user_id"] == user_id
+            assert "session_id" in stats
+            assert isinstance(stats["duration"], float)
+            assert stats["duration"] >= 0
+            assert stats["facts_extracted"] == 1
+            assert stats["episodes_extracted"] == 0
+            assert stats["triples_extracted"] == 0
+            assert stats["messages_processed"] == 1
+        finally:
+            await instance.close()
+
+    @pytest.mark.asyncio
+    async def test_on_extraction_async_callback(self, mock_embedding):
+        """on_extraction should support async callbacks."""
+        llm = MockLLMProvider(response="""```json
+{
+  "facts": [
+    {"content": "住在北京", "category": "location", "confidence": 0.9, "importance": 5}
+  ],
+  "episodes": [],
+  "triples": [],
+  "profile_updates": {}
+}
+```""")
+        callback_data = []
+
+        async def async_callback(stats):
+            callback_data.append(stats)
+
+        instance = NeuroMemory(
+            database_url=TEST_DATABASE_URL,
+            embedding=mock_embedding,
+            llm=llm,
+            on_extraction=async_callback,
+        )
+        await instance.init()
+        try:
+            user_id = "callback_u2"
+            await instance.conversations.add_message(
+                user_id=user_id, role="user", content="住在北京",
+            )
+            messages = await instance.conversations.get_unextracted_messages(user_id)
+            await instance._do_extraction(user_id, messages[0].session_id)
+
+            assert len(callback_data) == 1
+            assert callback_data[0]["facts_extracted"] == 1
+        finally:
+            await instance.close()
