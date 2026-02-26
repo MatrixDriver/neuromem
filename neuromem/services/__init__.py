@@ -1,1 +1,1 @@
-"""NeuroMemory service layer."""
+"""neuromem service layer."""

@@ -20,7 +20,7 @@ except ImportError:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="NeuroMemory Benchmark Evaluation",
+        description="neuromem Benchmark Evaluation",
         prog="python -m evaluation.cli",
     )
     parser.add_argument(

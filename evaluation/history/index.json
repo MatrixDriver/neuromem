@@ -1,7 +1,7 @@
 {
   "meta": {
     "created": "2025-02-16",
-    "description": "NeuroMemory LoCoMo 基准测试历史记录",
+    "description": "neuromem LoCoMo 基准测试历史记录",
     "benchmark": "locomo",
     "dataset": "locomo10.json"
   },
