@@ -8,18 +8,20 @@ neuromem (v0.8.0) 是一个 **AI 记忆管理框架**，为 AI agent 开发者�
 
 **三种访问方式**：
 - **Python SDK**：`from neuromem import NeuroMemory`，直接嵌入 agent 程序（本仓库 `neuromem/`）
-- **Cloud REST API**：`https://api.neuromem.cloud/api/v1/{ingest,recall,digest}`，任意语言 HTTP 调用（本仓库 `java/`）
-- **MCP**：`https://api.neuromem.cloud/mcp/`，兼容 Claude Code/Desktop、Cursor、ChatGPT（外部服务，封装 Cloud REST API 为 MCP 协议）
+- **Cloud REST API**：`https://api.neuromem.cloud/api/v1/{ingest,recall,digest}`，任意语言 HTTP 调用
+- **MCP**：`https://api.neuromem.cloud/mcp/`，兼容 Claude Code/Desktop、Cursor、ChatGPT
 
-**调用链路**：`MCP 客户端` → `neuromem MCP Server`（外部） → `Java Cloud REST API`（本仓库 `java/`） → `PostgreSQL`
+**调用链路**：`MCP 客户端` → `neuromem MCP Server` → `Cloud REST API` → `PostgreSQL`
+
+neuromem.cloud 完整服务（智能体管理、Web 控制台、MCP 桥接、ingest/recall/digest API）不在本仓库中。本仓库 `java/` 仅为 Cloud Server 的早期脚手架（基础 Tenant/Search/Preference 端点），与线上服务功能差距较大。
 
 **仓库结构**：
 - **Python SDK** (`neuromem/`)：核心记忆框架库，可插拔 Provider（Embedding/LLM/Storage）
-- **Java Cloud Server** (`java/`)：Spring Boot WebFlux 响应式 REST API 服务端，Bearer Token 认证，多租户隔离
+- **Java Cloud Server 脚手架** (`java/`)：Spring Boot WebFlux 早期原型，仅含基础端点
 - **PostgreSQL + pgvector + pg_search**：统一存储后端（结构化数据 + 向量检索 + BM25 全文搜索）
 - **图存储**：基于关系表（GraphNode/GraphEdge），无 Apache AGE 依赖
 
-**数据隔离**：Python SDK 按 user_id 隔离；Java Server 按 tenant_id + user_id 双层隔离。
+**数据隔离**：Python SDK 按 user_id 隔离；Cloud Server 按 tenant_id + user_id 双层隔离。
 
 ## 常用命令
 
