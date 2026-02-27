@@ -7,9 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 neuromem (v0.8.0) 是一个 **AI 记忆管理框架**，为 AI agent 开发者提供记忆存储、检索和推理能力。已发布到 PyPI。
 
 **三种访问方式**：
-- **Python SDK**：`from neuromem import NeuroMemory`，直接嵌入 agent 程序（本仓库）
-- **Cloud REST API**：`https://api.neuromem.cloud/api/v1/{ingest,recall,digest}`，任意语言 HTTP 调用
-- **MCP**：`https://api.neuromem.cloud/mcp/`，兼容 Claude Code/Desktop、Cursor、ChatGPT
+- **Python SDK**：`from neuromem import NeuroMemory`，直接嵌入 agent 程序（本仓库 `neuromem/`）
+- **Cloud REST API**：`https://api.neuromem.cloud/api/v1/{ingest,recall,digest}`，任意语言 HTTP 调用（本仓库 `java/`）
+- **MCP**：`https://api.neuromem.cloud/mcp/`，兼容 Claude Code/Desktop、Cursor、ChatGPT（外部服务，封装 Cloud REST API 为 MCP 协议）
+
+**调用链路**：`MCP 客户端` → `neuromem MCP Server`（外部） → `Java Cloud REST API`（本仓库 `java/`） → `PostgreSQL`
 
 **仓库结构**：
 - **Python SDK** (`neuromem/`)：核心记忆框架库，可插拔 Provider（Embedding/LLM/Storage）
