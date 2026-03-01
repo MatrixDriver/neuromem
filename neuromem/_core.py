@@ -210,6 +210,7 @@ class ConversationsFacade:
         _embedding: EmbeddingProvider | None = None,
         _llm: LLMProvider | None = None,
         _graph_enabled: bool = False,
+        _get_on_extraction=None,
     ):
         self._db = db
         self._on_message_added = _on_message_added
@@ -219,6 +220,7 @@ class ConversationsFacade:
         self._embedding = _embedding
         self._llm = _llm
         self._graph_enabled = _graph_enabled
+        self._get_on_extraction = _get_on_extraction
 
     async def ingest(self, user_id: str, role: str, content: str, session_id: str | None = None, metadata: dict | None = None):
         from neuromem.services.conversation import ConversationService
@@ -312,6 +314,17 @@ class ConversationsFacade:
             await extraction_svc.extract_from_messages(user_id, messages)
 
         logger.debug(f"Auto-extracted memories for {user_id} from single message")
+
+        # Fire public on_extraction callback (for tracing/monitoring)
+        if self._get_on_extraction:
+            cb = self._get_on_extraction()
+            if cb:
+                try:
+                    result = cb({"user_id": user_id, "session_id": session_id})
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as e:
+                    logger.warning("on_extraction callback error: %s", e)
 
         if self._on_extraction_done:
             asyncio.create_task(self._on_extraction_done(user_id))
@@ -610,9 +623,10 @@ class NeuroMemory:
             _on_session_closed=on_close,
             _on_extraction_done=on_extraction_done,
             _auto_extract=auto_extract,
-            _embedding=embedding,
-            _llm=llm,
+            _embedding=self._embedding,
+            _llm=self._llm,
             _graph_enabled=graph_enabled,
+            _get_on_extraction=lambda: self._on_extraction,
         )
         self.graph = GraphFacade(self._db)
 
