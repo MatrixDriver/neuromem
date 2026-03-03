@@ -194,7 +194,7 @@ class MemoryExtractionService:
         result_text = await self._llm.chat(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=2048,
+            max_tokens=4096,
         )
         return self._parse_classification_result(result_text)
 
