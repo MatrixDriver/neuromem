@@ -780,9 +780,9 @@ class ReflectionService:
             logger.error("Insight generation LLM call failed: %s", e, exc_info=True)
             return []
 
-        # Store insights with memory_type="trait", trait_stage="trend"
+        # Filter valid insights first
         _MIN_INSIGHT_IMPORTANCE = 7
-        stored = []
+        valid_insights = []
         for insight in insights:
             content = insight.get("content")
             category = insight.get("category", "pattern")
@@ -792,24 +792,36 @@ class ReflectionService:
             if importance < _MIN_INSIGHT_IMPORTANCE:
                 logger.debug("Skipping low-importance insight (importance=%d): %s", importance, content[:60])
                 continue
-            try:
-                vector = await self._embedding.embed(content)
-                embedding_obj = Memory(
-                    user_id=user_id,
-                    content=content,
-                    embedding=vector,
-                    memory_type="trait",
-                    trait_stage="trend",
-                    metadata_={
-                        "category": category,
-                        "source_ids": insight.get("source_ids", []),
-                        "importance": importance,
-                    },
-                )
-                self.db.add(embedding_obj)
-                stored.append(insight)
-            except Exception as e:
-                logger.error("Failed to store insight: %s", e)
+            valid_insights.append(insight)
+
+        if not valid_insights:
+            return []
+
+        # Embed all insights in parallel
+        import asyncio
+        contents = [ins["content"] for ins in valid_insights]
+        embed_tasks = [self._embedding.embed(c) for c in contents]
+        vectors = await asyncio.gather(*embed_tasks, return_exceptions=True)
+
+        stored = []
+        for insight, vector in zip(valid_insights, vectors):
+            if isinstance(vector, Exception):
+                logger.error("Failed to embed insight: %s", vector)
+                continue
+            embedding_obj = Memory(
+                user_id=user_id,
+                content=insight["content"],
+                embedding=vector,
+                memory_type="trait",
+                trait_stage="trend",
+                metadata_={
+                    "category": insight.get("category", "pattern"),
+                    "source_ids": insight.get("source_ids", []),
+                    "importance": int(insight.get("importance", 8)),
+                },
+            )
+            self.db.add(embedding_obj)
+            stored.append(insight)
 
         if stored:
             await self.db.commit()

@@ -1835,7 +1835,7 @@ class NeuroMemory:
     async def _digest_impl(
         self,
         user_id: str,
-        batch_size: int = 50,
+        batch_size: int = 30,
     ) -> dict:
         """Internal implementation of digest()."""
         from neuromem.services.reflection import ReflectionService
@@ -1894,8 +1894,10 @@ class NeuroMemory:
         total_analyzed = 0
         offset = 0
         max_created_at = watermark  # track new watermark
+        max_batches = 10  # cap to prevent runaway loops
+        batch_count = 0
 
-        while True:
+        while batch_count < max_batches:
             batch: list[dict] = []
             async with self._db.session() as session:
                 where = "user_id = :uid AND memory_type != 'insight'"
@@ -1947,6 +1949,7 @@ class NeuroMemory:
                 user_id, offset, len(batch), len(batch_insights), len(all_insights), cnt,
             )
 
+            batch_count += 1
             if len(batch) < batch_size:
                 break
             offset += batch_size

@@ -98,9 +98,10 @@ async def test_parse_classification_result():
     """)
     assert len(result2["facts"]) == 1
 
-    # Invalid JSON
-    result3 = svc._parse_classification_result("not json")
-    assert result3 == {"facts": [], "episodes": [], "triples": []}
+    # Invalid JSON now raises (errors are not swallowed)
+    import json
+    with pytest.raises(json.JSONDecodeError):
+        svc._parse_classification_result("not json")
 
 
 @pytest.mark.asyncio
