@@ -434,7 +434,7 @@ class MemoryExtractionService:
 """
 
         return f"""Extract structured memory information from the following conversation. Return results strictly in JSON format.
-**Language rule**: ALL extracted content fields MUST be in English. Do NOT produce translations or bilingual duplicates.
+**Language rule**: All content/value fields MUST use the same language as the conversation. Do NOT produce bilingual or translated duplicates. Each piece of information should appear exactly once, in the conversation's language.
 
 Conversation:
 ```
