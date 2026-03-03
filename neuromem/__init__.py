@@ -4,7 +4,6 @@ __version__ = "0.9.1"
 
 from neuromem._core import ExtractionStrategy, NeuroMemory
 from neuromem.db import Database
-from neuromem.models.emotion_profile import EmotionProfile
 from neuromem.models.graph import EdgeType, NodeType
 from neuromem.providers.embedding import EmbeddingProvider
 from neuromem.providers.llm import LLMProvider
@@ -25,7 +24,6 @@ __all__ = [
     "ExtractionStrategy",
     "NeuroMemory",
     "Database",
-    "EmotionProfile",
     "EmbeddingProvider",
     "LLMProvider",
     "SiliconFlowEmbedding",
