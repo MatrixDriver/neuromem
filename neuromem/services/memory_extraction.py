@@ -105,55 +105,66 @@ class MemoryExtractionService:
                 _embed_or_empty([e["content"] for e in valid_episodes]),
                 return_exceptions=True,
             )
-            if isinstance(_results[0], Exception):
-                logger.error(f"❌ facts embedding 失败: {_results[0]}", exc_info=_results[0])
+            fact_err = isinstance(_results[0], Exception)
+            episode_err = isinstance(_results[1], Exception)
+            if fact_err:
+                logger.error(f"facts embedding failed: {_results[0]}")
             else:
                 fact_vectors = _results[0]
-            if isinstance(_results[1], Exception):
-                logger.error(f"❌ episodes embedding 失败: {_results[1]}", exc_info=_results[1])
+            if episode_err:
+                logger.error(f"episodes embedding failed: {_results[1]}")
             else:
                 episode_vectors = _results[1]
+            # If all embeddings failed, raise so extraction is marked as failed
+            if fact_err and episode_err:
+                raise RuntimeError(f"Embedding failed for all items: {_results[0]}")
 
-        try:
-            facts_count = await self._store_facts(user_id, valid_facts, ref_time, pre_vectors=fact_vectors)
-            logger.info(f"✅ 存储 facts 成功: {facts_count}")
-        except Exception as e:
-            logger.error(f"❌ 存储 facts 失败: {e}", exc_info=True)
-            facts_count = 0
-
-        try:
-            episodes_count = await self._store_episodes(user_id, valid_episodes, ref_time, pre_vectors=episode_vectors)
-            logger.info(f"✅ 存储 episodes 成功: {episodes_count}")
-        except Exception as e:
-            logger.error(f"❌ 存储 episodes 失败: {e}", exc_info=True)
-            episodes_count = 0
-
+        facts_count = 0
+        episodes_count = 0
         triples_count = 0
-        if self._graph_enabled:
-            try:
-                logger.info(f"开始存储 triples: {len(classified.get('triples', []))} 个")
-                triples_count = await self._store_triples(user_id, classified["triples"])
-                logger.info(f"✅ 存储 triples 成功: {triples_count}")
-            except Exception as e:
-                logger.error(f"❌ 存储 triples 失败: {e}", exc_info=True)
-                triples_count = 0
+        errors: list[str] = []
 
-        # 统一提交所有记忆（facts, episodes, triples）
-        # 保证原子性：要么全部成功，要么全部失败
+        if valid_facts and fact_vectors:
+            try:
+                facts_count = await self._store_facts(user_id, valid_facts, ref_time, pre_vectors=fact_vectors)
+            except Exception as e:
+                errors.append(f"store facts: {e}")
+
+        if valid_episodes and episode_vectors:
+            try:
+                episodes_count = await self._store_episodes(user_id, valid_episodes, ref_time, pre_vectors=episode_vectors)
+            except Exception as e:
+                errors.append(f"store episodes: {e}")
+
+        if self._graph_enabled and classified.get("triples"):
+            try:
+                triples_count = await self._store_triples(user_id, classified["triples"])
+            except Exception as e:
+                errors.append(f"store triples: {e}")
+
         total_count = facts_count + episodes_count + triples_count
         if total_count > 0:
             try:
                 await self.db.commit()
-                logger.info(f"✅ 所有记忆已提交 (facts={facts_count}, "
+                logger.info(f"Committed memories (facts={facts_count}, "
                            f"episodes={episodes_count}, triples={triples_count})")
             except Exception as e:
-                logger.error(f"❌ 提交记忆失败，回滚所有更改: {e}", exc_info=True)
+                logger.error(f"Commit failed, rolling back: {e}", exc_info=True)
                 try:
                     await self.db.rollback()
                 except Exception:
                     pass
-                # 提交失败，所有计数归零
-                facts_count = episodes_count = triples_count = 0
+                raise RuntimeError(f"Failed to commit memories: {e}") from e
+
+        # If we had valid items but stored nothing, raise so extraction is marked failed
+        if errors:
+            logger.error(f"Partial extraction failures: {errors}")
+        if total_count == 0 and (valid_facts or valid_episodes):
+            raise RuntimeError(
+                f"Extraction produced 0 memories from "
+                f"{len(valid_facts)} facts, {len(valid_episodes)} episodes. "
+                f"Errors: {'; '.join(errors) if errors else 'all items filtered or storage failed'}"
+            )
 
         return {
             "facts_extracted": facts_count,
@@ -180,17 +191,12 @@ class MemoryExtractionService:
 
         prompt = self._build_classification_prompt(conversation_text, language, session_timestamp)
 
-        try:
-            result_text = await self._llm.chat(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=2048,
-            )
-            extracted = self._parse_classification_result(result_text)
-            return extracted
-        except Exception as e:
-            logger.error("Classification failed: %s", e, exc_info=True)
-            return {"facts": [], "episodes": [], "triples": []}
+        result_text = await self._llm.chat(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=2048,
+        )
+        return self._parse_classification_result(result_text)
 
     def _format_conversation(self, messages: list[dict]) -> str:
         lines = []
@@ -550,58 +556,49 @@ Return format (JSON only, no other content):
         return text
 
     def _parse_classification_result(self, result_text: str) -> dict[str, list[dict]]:
-        """Parse LLM classification result with JSON repair fallback."""
+        """Parse LLM classification result with JSON repair fallback.
+
+        Raises on failure so callers can mark extraction_status='failed'.
+        """
+        text = result_text.strip()
+
+        if "```json" in text:
+            start = text.find("```json") + 7
+            end = text.find("```", start)
+            text = text[start:end].strip()
+        elif "```" in text:
+            start = text.find("```") + 3
+            end = text.find("```", start)
+            text = text[start:end].strip()
+
+        # Try parsing directly first
         try:
-            text = result_text.strip()
+            result = json.loads(text)
+        except json.JSONDecodeError:
+            # Attempt repair and retry
+            repaired = self._repair_json(text)
+            result = json.loads(repaired)
+            logger.info("JSON repair succeeded for classification result")
 
-            if "```json" in text:
-                start = text.find("```json") + 7
-                end = text.find("```", start)
-                text = text[start:end].strip()
-            elif "```" in text:
-                start = text.find("```") + 3
-                end = text.find("```", start)
-                text = text[start:end].strip()
+        if not isinstance(result, dict):
+            raise ValueError("LLM classification result is not a JSON object")
 
-            # Try parsing directly first
-            try:
-                result = json.loads(text)
-            except json.JSONDecodeError:
-                # Attempt repair and retry
-                repaired = self._repair_json(text)
-                try:
-                    result = json.loads(repaired)
-                    logger.info("JSON repair succeeded for classification result")
-                except json.JSONDecodeError as e2:
-                    logger.error("Failed to parse JSON even after repair: %s", e2)
-                    return {"facts": [], "episodes": [], "triples": []}
+        facts = result.get("facts", [])
+        episodes = result.get("episodes", [])
+        triples = result.get("triples", [])
 
-            if not isinstance(result, dict):
-                raise ValueError("Result is not a dictionary")
+        if not isinstance(facts, list):
+            facts = []
+        if not isinstance(episodes, list):
+            episodes = []
+        if not isinstance(triples, list):
+            triples = []
 
-            facts = result.get("facts", [])
-            episodes = result.get("episodes", [])
-            triples = result.get("triples", [])
-
-            if not isinstance(facts, list):
-                facts = []
-            if not isinstance(episodes, list):
-                episodes = []
-            if not isinstance(triples, list):
-                triples = []
-
-            return {
-                "facts": facts,
-                "episodes": episodes,
-                "triples": triples,
-            }
-
-        except json.JSONDecodeError as e:
-            logger.error("Failed to parse JSON from classification result: %s", e)
-            return {"facts": [], "episodes": [], "triples": []}
-        except Exception as e:
-            logger.error("Error parsing classification result: %s", e)
-            return {"facts": [], "episodes": [], "triples": []}
+        return {
+            "facts": facts,
+            "episodes": episodes,
+            "triples": triples,
+        }
 
     def _resolve_timestamp(
         self,
