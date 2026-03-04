@@ -1572,7 +1572,9 @@ class NeuroMemory:
         Returns:
             {
                 "facts": {category: value, ...},
-                "traits": [{content, subtype, stage, confidence, context}, ...],
+                "traits": [{content, subtype, stage, confidence, context,
+                            reinforcement_count, first_observed, last_reinforced,
+                            contradiction_count}, ...],
                 "recent_mood": {valence_avg, arousal_avg, sample_count, period} | None,
             }
         """
@@ -1623,7 +1625,8 @@ class NeuroMemory:
             async with self._db.session() as session:
                 result = await session.execute(
                     sql_text(
-                        "SELECT content, trait_subtype, trait_stage, trait_confidence, trait_context "
+                        "SELECT content, trait_subtype, trait_stage, trait_confidence, trait_context, "
+                        "trait_reinforcement_count, trait_first_observed, trait_last_reinforced, trait_contradiction_count "
                         "FROM memories "
                         "WHERE user_id = :uid AND memory_type = 'trait' "
                         "AND trait_stage NOT IN ('trend', 'dissolved') "
@@ -1639,6 +1642,10 @@ class NeuroMemory:
                         "stage": r.trait_stage,
                         "confidence": float(r.trait_confidence) if r.trait_confidence else 0.0,
                         "context": r.trait_context,
+                        "reinforcement_count": r.trait_reinforcement_count or 0,
+                        "first_observed": r.trait_first_observed.isoformat() if r.trait_first_observed else None,
+                        "last_reinforced": r.trait_last_reinforced.isoformat() if r.trait_last_reinforced else None,
+                        "contradiction_count": r.trait_contradiction_count or 0,
                     }
                     for r in result.fetchall()
                 ]

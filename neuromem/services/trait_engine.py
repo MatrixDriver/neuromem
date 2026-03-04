@@ -80,6 +80,8 @@ class TraitEngine:
         """Create a trend-stage trait. Returns None if content is sensitive."""
         from neuromem.services.reflection import is_sensitive_trait
 
+        context = context or "unspecified"
+
         if is_sensitive_trait(content):
             logger.warning("Rejecting sensitive trend: %s", content[:60])
             return None
@@ -138,6 +140,8 @@ class TraitEngine:
     ) -> Memory | None:
         """Create a candidate-stage behavior trait. Returns None if content is sensitive."""
         from neuromem.services.reflection import is_sensitive_trait
+
+        context = context or "unspecified"
 
         if is_sensitive_trait(content):
             logger.warning("Rejecting sensitive behavior: %s", content[:60])
@@ -520,7 +524,7 @@ class TraitEngine:
             content=trait.content,
             subtype=trait.trait_subtype or "behavior",
             confidence=trait.trait_confidence or 0.0,
-            context=trait.trait_context or "general",
+            context=trait.trait_context or "unspecified",
             supporting_count=len(supporting),
             supporting_list=supporting_list,
             contradicting_count=len(contradicting),

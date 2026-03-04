@@ -233,7 +233,7 @@ class MemoryExtractionService:
         """
         # Check KV preference
         kv_service = KVService(self.db)
-        lang_kv = await kv_service.get("profile", user_id, "language")
+        lang_kv = await kv_service.get("settings", user_id, "language")
 
         if lang_kv and lang_kv.value in ["en", "zh"]:
             # If preference exists, check if language switched
@@ -245,13 +245,13 @@ class MemoryExtractionService:
                     logger.info(
                         f"Language preference updated: {user_id} {lang_kv.value} → {detected}"
                     )
-                    await kv_service.set("profile", user_id, "language", detected)
+                    await kv_service.set("settings", user_id, "language", detected)
                     return detected
             return lang_kv.value
 
         # First time: auto-detect and save
         detected = self._detect_language(conversation_text)
-        await kv_service.set("profile", user_id, "language", detected)
+        await kv_service.set("settings", user_id, "language", detected)
         return detected
 
     def _detect_language(self, text: str) -> str:
