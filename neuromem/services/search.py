@@ -260,6 +260,8 @@ class SearchService:
         created_after: datetime | None = None,
         created_before: datetime | None = None,
         current_emotion: dict | None = None,
+        query_context: str | None = None,
+        context_confidence: float = 0.0,
     ) -> list[dict]:
         """Cosine-based scored search with BM25 hybrid and recency/importance bonuses.
 
@@ -343,6 +345,23 @@ class SearchService:
         else:
             emotion_bonus_sql = "0"
 
+        # Context matching bonus SQL fragment
+        _VALID_CONTEXTS = {"work", "personal", "social", "learning", "general"}
+        if query_context and query_context not in _VALID_CONTEXTS:
+            query_context = None
+        if query_context and query_context != "general" and context_confidence > 0:
+            context_bonus_sql = (
+                f"CASE"
+                f"  WHEN memory_type = 'trait' AND trait_context = '{query_context}'"
+                f"  THEN {0.10 * context_confidence:.4f}"
+                f"  WHEN memory_type = 'trait' AND trait_context = 'general'"
+                f"  THEN {0.07 * context_confidence:.4f}"
+                f"  ELSE 0"
+                f" END"
+            )
+        else:
+            context_bonus_sql = "0"
+
         candidate_limit = limit * 2 if self._pg_search else limit * 4
 
         if self._pg_search:
@@ -376,7 +395,7 @@ class SearchService:
             f"""
             WITH vector_ranked AS (
                 SELECT id, content, memory_type, metadata, created_at, extracted_timestamp,
-                       access_count, last_accessed_at, trait_stage,
+                       access_count, last_accessed_at, trait_stage, trait_context,
                        1 - (embedding <=> '{vector_str}') AS vector_score,
                        ROW_NUMBER() OVER (ORDER BY embedding <=> '{vector_str}') AS vector_rank
                 FROM memories
@@ -395,7 +414,7 @@ class SearchService:
                 LEFT JOIN bm25_ranked b ON v.id = b.id
             )
             SELECT id, content, memory_type, metadata, created_at, extracted_timestamp,
-                   access_count, last_accessed_at, trait_stage,
+                   access_count, last_accessed_at, trait_stage, trait_context,
                    vector_score AS relevance,
                    bm25_score,
                    rrf_score,
@@ -408,6 +427,8 @@ class SearchService:
                    0.15 * COALESCE((metadata->>'importance')::float / 10.0, 0.5) AS importance,
                    -- emotion_match_bonus: 0~0.10
                    {emotion_bonus_sql} AS emotion_match,
+                   -- context_match_bonus: 0~0.10
+                   {context_bonus_sql} AS context_match,
                    -- final score: prospective_penalty × base_relevance × (1 + recency + importance + trait_boost + emotion_match)
                    CASE
                        WHEN metadata->>'temporality' = 'prospective'
@@ -435,6 +456,7 @@ class SearchService:
                           ELSE 0
                         END
                       + {emotion_bonus_sql}
+                      + {context_bonus_sql}
                    ) AS score
             FROM hybrid
             ORDER BY score DESC
@@ -459,6 +481,7 @@ class SearchService:
                 "recency": round(float(row.recency), 4),
                 "importance": round(float(row.importance), 4),
                 "emotion_match": round(float(row.emotion_match), 4),
+                "context_match": round(float(row.context_match), 4),
                 "score": round(float(row.score), 4),
             }
             for row in rows

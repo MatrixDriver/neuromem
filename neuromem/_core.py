@@ -623,6 +623,10 @@ class NeuroMemory:
         self._embedding_cache: OrderedDict[str, list[float]] = OrderedDict()
         self._embedding_cache_max_size = 100  # True LRU
 
+        # Context inference service (lazy prototype initialization)
+        from neuromem.services.context import ContextService
+        self._context_service = ContextService(self._embedding)
+
         # Set up callbacks if extraction is configured and LLM is available
         _has_extraction = bool(extraction and llm)
         on_msg = self._on_message_added if _has_extraction else None
@@ -1182,6 +1186,12 @@ class NeuroMemory:
         _event_before = event_before if event_before is not None else auto_before
         _decay = decay_rate or DEFAULT_DECAY_RATE
 
+        # Infer context from query (zero extra latency - reuses query_embedding)
+        await self._context_service.ensure_prototypes()
+        inferred_context, context_confidence = self._context_service.infer_context(
+            query_embedding, query_text=query
+        )
+
         # Parallel fetch: memories + profile (+ conversations + graph if enabled)
         coros = [
             self._fetch_vector_memories(
@@ -1191,6 +1201,8 @@ class NeuroMemory:
                 created_after=created_after,
                 created_before=created_before,
                 current_emotion=current_emotion,
+                query_context=inferred_context,
+                context_confidence=context_confidence,
             ),
             self.profile_view(user_id),
         ]
@@ -1409,6 +1421,8 @@ class NeuroMemory:
             "user_profile": user_profile,
             "active_traits": active_traits,
             "merged": merged[:limit],
+            "inferred_context": inferred_context,
+            "context_confidence": context_confidence,
         }
 
     async def _search_conversations(
@@ -1492,6 +1506,8 @@ class NeuroMemory:
         created_after: datetime | None = None,
         created_before: datetime | None = None,
         current_emotion: dict | None = None,
+        query_context: str | None = None,
+        context_confidence: float = 0.0,
     ) -> list[dict]:
         """Search extracted memories (vector + BM25 hybrid).
 
@@ -1508,6 +1524,8 @@ class NeuroMemory:
             created_after=created_after,
             created_before=created_before,
             current_emotion=current_emotion,
+            query_context=query_context,
+            context_confidence=context_confidence,
         )
 
         # User explicitly specified memory_type → single search
