@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from neuromem.db import _is_encrypted
 from neuromem.models.memory import Memory
 from neuromem.providers.embedding import EmbeddingProvider
+from neuromem.services.context import ContextService
 
 logger = logging.getLogger(__name__)
 
@@ -350,12 +351,14 @@ class SearchService:
         if query_context and query_context not in _VALID_CONTEXTS:
             query_context = None
         if query_context and query_context != "general" and context_confidence > 0:
+            max_context_boost = ContextService.MAX_CONTEXT_BOOST
+            general_context_boost = ContextService.GENERAL_CONTEXT_BOOST
             context_bonus_sql = (
                 f"CASE"
-                f"  WHEN memory_type = 'trait' AND trait_context = '{query_context}'"
-                f"  THEN {0.10 * context_confidence:.4f}"
-                f"  WHEN memory_type = 'trait' AND trait_context = 'general'"
-                f"  THEN {0.07 * context_confidence:.4f}"
+                f"  WHEN trait_context = '{query_context}'"
+                f"  THEN {max_context_boost * context_confidence:.4f}"
+                f"  WHEN trait_context = 'general'"
+                f"  THEN {general_context_boost * context_confidence:.4f}"
                 f"  ELSE 0"
                 f" END"
             )

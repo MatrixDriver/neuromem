@@ -60,6 +60,7 @@ async def _insert_fact(
     *,
     user_id: str = "ctx_user",
     content: str | None = None,
+    trait_context: str | None = None,
 ) -> str:
     """Insert a fact memory, return its id."""
     svc = SearchService(db_session, mock_embedding)
@@ -72,6 +73,40 @@ async def _insert_fact(
         metadata={"importance": 7},
     )
     await db_session.commit()
+    if trait_context:
+        await db_session.execute(
+            text("UPDATE memories SET trait_context = :ctx WHERE id = :mid"),
+            {"ctx": trait_context, "mid": str(record.id)},
+        )
+        await db_session.commit()
+    return str(record.id)
+
+
+async def _insert_episode(
+    db_session,
+    mock_embedding,
+    *,
+    user_id: str = "ctx_user",
+    content: str | None = None,
+    trait_context: str | None = None,
+) -> str:
+    """Insert an episodic memory, return its id."""
+    svc = SearchService(db_session, mock_embedding)
+    if content is None:
+        content = f"episode {uuid.uuid4().hex[:8]}"
+    record = await svc.add_memory(
+        user_id=user_id,
+        content=content,
+        memory_type="episodic",
+        metadata={"importance": 7},
+    )
+    await db_session.commit()
+    if trait_context:
+        await db_session.execute(
+            text("UPDATE memories SET trait_context = :ctx WHERE id = :mid"),
+            {"ctx": trait_context, "mid": str(record.id)},
+        )
+        await db_session.commit()
     return str(record.id)
 
 
@@ -123,9 +158,71 @@ class TestContextMatchBonus:
         assert personal_result is not None, "personal trait should appear in results"
 
     @pytest.mark.asyncio
-    async def test_fact_no_context_boost(self, db_session, mock_embedding):
-        """CM-4: Fact memory should not receive context_match bonus."""
+    async def test_fact_with_context_gets_boost(self, db_session, mock_embedding):
+        """CM-4: Fact with matching context should score higher than mismatching."""
         uid = f"cm4_{uuid.uuid4().hex[:6]}"
+        base = uuid.uuid4().hex[:6]
+
+        work_fact_id = await _insert_fact(
+            db_session, mock_embedding,
+            user_id=uid, content=f"work coding project {base}",
+            trait_context="work",
+        )
+        personal_fact_id = await _insert_fact(
+            db_session, mock_embedding,
+            user_id=uid, content=f"personal cooking recipe {base}",
+            trait_context="personal",
+        )
+
+        svc = SearchService(db_session, mock_embedding)
+        results = await svc.scored_search(
+            user_id=uid, query=f"work coding project {base}",
+            limit=10, query_context="work", context_confidence=0.8,
+        )
+
+        work_result = next((r for r in results if r["id"] == work_fact_id), None)
+        personal_result = next((r for r in results if r["id"] == personal_fact_id), None)
+        assert work_result is not None, "work fact should appear in results"
+        assert personal_result is not None, "personal fact should appear in results"
+        assert work_result["score"] > personal_result["score"], (
+            f"work fact ({work_result['score']}) should outscore personal fact ({personal_result['score']})"
+        )
+
+    @pytest.mark.asyncio
+    async def test_episode_with_context_gets_boost(self, db_session, mock_embedding):
+        """CM-4b: Episode with matching context should score higher than mismatching."""
+        uid = f"cm4b_{uuid.uuid4().hex[:6]}"
+        base = uuid.uuid4().hex[:6]
+
+        work_ep_id = await _insert_episode(
+            db_session, mock_embedding,
+            user_id=uid, content=f"attended team standup meeting {base}",
+            trait_context="work",
+        )
+        personal_ep_id = await _insert_episode(
+            db_session, mock_embedding,
+            user_id=uid, content=f"went hiking with family {base}",
+            trait_context="personal",
+        )
+
+        svc = SearchService(db_session, mock_embedding)
+        results = await svc.scored_search(
+            user_id=uid, query=f"attended team standup meeting {base}",
+            limit=10, query_context="work", context_confidence=0.8,
+        )
+
+        work_result = next((r for r in results if r["id"] == work_ep_id), None)
+        personal_result = next((r for r in results if r["id"] == personal_ep_id), None)
+        assert work_result is not None, "work episode should appear in results"
+        assert personal_result is not None, "personal episode should appear in results"
+        assert work_result["score"] > personal_result["score"], (
+            f"work episode ({work_result['score']}) should outscore personal episode ({personal_result['score']})"
+        )
+
+    @pytest.mark.asyncio
+    async def test_null_context_no_penalty(self, db_session, mock_embedding):
+        """CM-4c: Memory with NULL trait_context should get context_match=0, no penalty."""
+        uid = f"cm4c_{uuid.uuid4().hex[:6]}"
         content = f"user works at Google {uuid.uuid4().hex[:6]}"
 
         fact_id = await _insert_fact(
@@ -136,13 +233,12 @@ class TestContextMatchBonus:
         svc = SearchService(db_session, mock_embedding)
         results = await svc.scored_search(
             user_id=uid, query=content, limit=10,
+            query_context="work", context_confidence=0.8,
         )
 
         fact_result = next((r for r in results if r["id"] == fact_id), None)
         assert fact_result is not None
-        # Fact should have no context_match field or it should be 0
-        if "context_match" in fact_result:
-            assert fact_result["context_match"] == 0
+        assert fact_result["context_match"] == 0
 
     @pytest.mark.asyncio
     async def test_trait_without_context_metadata(self, db_session, mock_embedding):

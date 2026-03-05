@@ -177,9 +177,9 @@ class ContextService:
     lazily loaded and cached in memory.
     """
 
-    MARGIN_THRESHOLD = 0.05
-    MAX_CONTEXT_BOOST = 0.10
-    GENERAL_CONTEXT_BOOST = 0.07
+    MARGIN_THRESHOLD = 0.03
+    MAX_CONTEXT_BOOST = 0.15
+    GENERAL_CONTEXT_BOOST = 0.10
     CONFIDENCE_NORMALIZER = 0.15
 
     def __init__(self, embedding: EmbeddingProvider):

@@ -633,3 +633,139 @@ async def test_auto_extract_batch_messages(db_session, mock_embedding):
     )
     count = result.scalar()
     assert count >= 1  # At least some facts extracted
+
+
+# ===========================================================================
+# Context annotation tests
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_extraction_prompt_contains_context_field():
+    """Test that both zh and en prompts contain context field description."""
+    svc = MemoryExtractionService.__new__(MemoryExtractionService)
+    svc._graph_enabled = False
+
+    zh_prompt = svc._build_zh_prompt("USER: test\nASSISTANT: ok")
+    assert '"context":' in zh_prompt
+    assert "work" in zh_prompt
+    assert "personal" in zh_prompt
+    assert "social" in zh_prompt
+    assert "learning" in zh_prompt
+    assert "general" in zh_prompt
+
+    en_prompt = svc._build_en_prompt("USER: test\nASSISTANT: ok")
+    assert '"context":' in en_prompt
+    assert "work" in en_prompt
+    assert "personal" in en_prompt
+    assert "social" in en_prompt
+    assert "learning" in en_prompt
+    assert "general" in en_prompt
+
+
+@pytest.mark.asyncio
+async def test_store_fact_writes_trait_context(db_session, mock_embedding):
+    """Test that _store_facts writes trait_context from LLM output."""
+    from sqlalchemy import text as sql_text
+
+    conv_svc = ConversationService(db_session)
+    _, _ = await conv_svc.add_messages_batch(
+        user_id="ctx_fact_user",
+        messages=[{"role": "user", "content": "I work at Google as an engineer"}],
+    )
+    messages = await conv_svc.get_unextracted_messages(user_id="ctx_fact_user")
+
+    mock_llm = MockLLMProvider(response="""```json
+{
+  "facts": [
+    {"content": "Works at Google as engineer", "category": "work", "confidence": 0.95, "context": "work"}
+  ],
+  "episodes": []
+}
+```""")
+
+    extraction_svc = MemoryExtractionService(db_session, mock_embedding, mock_llm)
+    result = await extraction_svc.extract_from_messages(
+        user_id="ctx_fact_user", messages=messages,
+    )
+
+    assert result["facts_extracted"] == 1
+
+    row = await db_session.execute(
+        sql_text("SELECT trait_context FROM memories WHERE user_id = :uid AND memory_type = 'fact'"),
+        {"uid": "ctx_fact_user"},
+    )
+    trait_context = row.scalar()
+    assert trait_context == "work"
+
+
+@pytest.mark.asyncio
+async def test_store_fact_invalid_context_fallback(db_session, mock_embedding):
+    """Test that invalid context value falls back to 'general'."""
+    from sqlalchemy import text as sql_text
+
+    conv_svc = ConversationService(db_session)
+    _, _ = await conv_svc.add_messages_batch(
+        user_id="ctx_invalid_user",
+        messages=[{"role": "user", "content": "Something happened"}],
+    )
+    messages = await conv_svc.get_unextracted_messages(user_id="ctx_invalid_user")
+
+    mock_llm = MockLLMProvider(response="""```json
+{
+  "facts": [
+    {"content": "Something happened to user", "category": "personal", "confidence": 0.9, "context": "invalid_value"}
+  ],
+  "episodes": []
+}
+```""")
+
+    extraction_svc = MemoryExtractionService(db_session, mock_embedding, mock_llm)
+    result = await extraction_svc.extract_from_messages(
+        user_id="ctx_invalid_user", messages=messages,
+    )
+
+    assert result["facts_extracted"] == 1
+
+    row = await db_session.execute(
+        sql_text("SELECT trait_context FROM memories WHERE user_id = :uid AND memory_type = 'fact'"),
+        {"uid": "ctx_invalid_user"},
+    )
+    trait_context = row.scalar()
+    assert trait_context == "general"
+
+
+@pytest.mark.asyncio
+async def test_store_fact_missing_context_fallback(db_session, mock_embedding):
+    """Test that missing context field falls back to 'general'."""
+    from sqlalchemy import text as sql_text
+
+    conv_svc = ConversationService(db_session)
+    _, _ = await conv_svc.add_messages_batch(
+        user_id="ctx_missing_user",
+        messages=[{"role": "user", "content": "I like programming"}],
+    )
+    messages = await conv_svc.get_unextracted_messages(user_id="ctx_missing_user")
+
+    mock_llm = MockLLMProvider(response="""```json
+{
+  "facts": [
+    {"content": "User likes programming", "category": "hobby", "confidence": 0.9}
+  ],
+  "episodes": []
+}
+```""")
+
+    extraction_svc = MemoryExtractionService(db_session, mock_embedding, mock_llm)
+    result = await extraction_svc.extract_from_messages(
+        user_id="ctx_missing_user", messages=messages,
+    )
+
+    assert result["facts_extracted"] == 1
+
+    row = await db_session.execute(
+        sql_text("SELECT trait_context FROM memories WHERE user_id = :uid AND memory_type = 'fact'"),
+        {"uid": "ctx_missing_user"},
+    )
+    trait_context = row.scalar()
+    assert trait_context == "general"

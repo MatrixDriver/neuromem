@@ -20,6 +20,15 @@ from neuromem.services.temporal import TemporalExtractor
 
 logger = logging.getLogger(__name__)
 
+_VALID_CONTEXTS = {"work", "personal", "social", "learning", "general"}
+
+
+def _validate_context(raw: str | None) -> str:
+    """Validate and normalize a context value, falling back to 'general'."""
+    if raw and raw in _VALID_CONTEXTS:
+        return raw
+    return "general"
+
 
 class MemoryExtractionService:
     """Service for extracting memories from conversations using LLM."""
@@ -335,7 +344,7 @@ class MemoryExtractionService:
 请提取以下记忆：
 
 1. **Facts（事实）**: 用户及对话中提到的人物的客观信息
-   - 格式: {{"content": "事实描述", "category": "分类", "temporality": "current|prospective|historical", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
+   - 格式: {{"content": "事实描述", "category": "分类", "temporality": "current|prospective|historical", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null, "context": "分类"}}
    - category 可选: identity, work, skill, hobby, personal, education, location, health, relationship, finance, values, workflow
    - procedure_steps: 如果 category 为 "workflow"，提取操作步骤列表（如 ["步骤1", "步骤2", "步骤3"]）。非 workflow 类别不需要此字段
    - temporality: 事实的时间性质（必填）
@@ -345,6 +354,12 @@ class MemoryExtractionService:
    - event_time: 事实发生的实际时间（ISO 日期格式如 "2026-02-25"），从对话中的时间表达推算。如果无法确定具体日期则设为 null
    - importance: 对用户的重要程度（1=随口一提, 5=日常信息, 9=非常重要如生日/重大事件, 10=核心身份信息）
    - emotion: 标注该事实相关的情感基调。大多数对话都带有情感色彩（积极/消极/中性），请尽量标注。仅当内容完全是客观事实（如"用户住在北京"）时才设为 null
+   - context: 该记忆所属的语境类别（必填）
+     * "work": 工作、编程、项目、会议、职业、技术相关
+     * "personal": 个人生活、家庭、健康、兴趣爱好、旅行
+     * "social": 社交关系、聚会、人际交往、约会
+     * "learning": 学习、教育、论文、课程、理论研究
+     * "general": 无法明确归类时使用此值
    - entities: 提取该事实中提到的人名、地点和关键主题
 
    **Facts 关键规则**:
@@ -379,12 +394,13 @@ class MemoryExtractionService:
      * 因果关系："用户因为新工作搬到了纽约"
 
 2. **Episodes（情景）**: 事件、经历、时间相关信息
-   - 格式: {{"content": "事件描述", "timestamp": "ISO日期或null", "timestamp_original": "原始时间表达或null", "people": ["人名1", "人名2"], "location": "地点或null", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null}}
+   - 格式: {{"content": "事件描述", "timestamp": "ISO日期或null", "timestamp_original": "原始时间表达或null", "people": ["人名1", "人名2"], "location": "地点或null", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "情感描述"}} 或 null, "context": "分类"}}
    - people: 事件中涉及的人物列表（不包括用户自己）
    - location: 事件发生的地点
    - timestamp: 尽可能计算为 ISO 8601 格式的绝对日期
    - timestamp_original: 对话中的原始时间表达（如"昨天"、"去年夏天"）
    - entities: 同 Facts
+   - context: 该事件所属的语境类别（必填），可选值: work / personal / social / learning / general
    - content 必须使用明确的名称，禁止代词
 
 3. **注意事项**:
@@ -450,7 +466,7 @@ Conversation:
 Extract the following memories:
 
 1. **Facts**: Objective information about the user and people mentioned
-   - Format: {{"content": "fact description", "category": "category", "temporality": "current|prospective|historical", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
+   - Format: {{"content": "fact description", "category": "category", "temporality": "current|prospective|historical", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null, "context": "category"}}
    - Category options: identity, work, skill, hobby, personal, education, location, health, relationship, finance, values, workflow
    - procedure_steps: If category is "workflow", extract the step list (e.g. ["step1", "step2", "step3"]). Not needed for other categories
    - Temporality (required):
@@ -460,6 +476,12 @@ Extract the following memories:
    - event_time: The actual date when the fact occurred (ISO date like "2026-02-25"), computed from time expressions in conversation. Set to null if the date cannot be determined
    - Importance: significance to user's life (1=casual mention, 5=daily info, 9=very important like birthday/major events, 10=core identity)
    - Emotion: tag the emotional tone for this fact. Most conversations carry emotional undertones (positive/negative/neutral) — tag them. Only set null for purely objective facts like "User lives in Beijing"
+   - context: The context category this memory belongs to (required)
+     * "work": programming, projects, meetings, career, technology
+     * "personal": daily life, family, health, hobbies, travel
+     * "social": social relationships, gatherings, interpersonal interactions, dating
+     * "learning": studying, education, papers, courses, theoretical research
+     * "general": use when the context cannot be clearly determined
    - entities: extract people names, locations, and key topics mentioned in this fact
 
    **CRITICAL rules for Facts**:
@@ -494,12 +516,13 @@ Extract the following memories:
      * Causal relationships: "The user moved to NYC because of a new job"
 
 2. **Episodes**: Events, experiences, temporal information
-   - Format: {{"content": "event description", "timestamp": "ISO date or null", "timestamp_original": "original time expression or null", "people": ["person1", "person2"], "location": "place or null", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null}}
+   - Format: {{"content": "event description", "timestamp": "ISO date or null", "timestamp_original": "original time expression or null", "people": ["person1", "person2"], "location": "place or null", "confidence": 0.0-1.0, "importance": 1-10, "entities": {{"people": [...], "locations": [...], "topics": [...]}}, "emotion": {{"valence": -1.0~1.0, "arousal": 0.0~1.0, "label": "emotion"}} or null, "context": "category"}}
    - people: List of people involved in the event (excluding the user)
    - location: Where the event occurred
    - timestamp: Computed absolute date in ISO 8601 format when possible
    - timestamp_original: The original time expression from the conversation (e.g. "yesterday", "last summer")
    - entities: same as Facts
+   - context: The context category this event belongs to (required), options: work / personal / social / learning / general
    - content MUST use explicit names, never pronouns
 
 3. **Guidelines**:
@@ -781,6 +804,8 @@ Return format (JSON only, no other content):
                     ref_time,
                 )
 
+                context = _validate_context(fact.get("context"))
+
                 now = datetime.now(timezone.utc)
                 embedding_obj = Memory(
                     user_id=user_id,
@@ -792,6 +817,7 @@ Return format (JSON only, no other content):
                     valid_from=now,
                     content_hash=content_hash,
                     valid_at=now,
+                    trait_context=context,
                 )
                 self.db.add(embedding_obj)
                 count += 1
@@ -892,6 +918,8 @@ Return format (JSON only, no other content):
                 if entities and isinstance(entities, dict):
                     meta["entities"] = entities
 
+                context = _validate_context(episode.get("context"))
+
                 now = datetime.now(timezone.utc)
                 embedding_obj = Memory(
                     user_id=user_id,
@@ -903,6 +931,7 @@ Return format (JSON only, no other content):
                     valid_from=now,
                     content_hash=content_hash,
                     valid_at=now,
+                    trait_context=context,
                 )
                 self.db.add(embedding_obj)
                 count += 1
