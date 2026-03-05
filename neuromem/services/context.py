@@ -201,15 +201,7 @@ class ContextService:
                 all_sentences.extend(sentences)
                 offset += len(sentences)
 
-            logger.warning(
-                "Context prototype init: embedding %d sentences...",
-                len(all_sentences),
-            )
             embeddings = await self._embedding.embed_batch(all_sentences)
-            logger.warning(
-                "Context prototype init: got %d embeddings",
-                len(embeddings),
-            )
 
             self._prototypes = {}
             self._prototype_norms = {}
@@ -241,7 +233,6 @@ class ContextService:
             (context_label, confidence) where confidence=0 means general/unknown.
         """
         if not self._prototypes:
-            logger.warning("infer_context: no prototypes, returning general")
             return ("general", 0.0)
 
         query_norm = math.sqrt(sum(x * x for x in query_embedding))
