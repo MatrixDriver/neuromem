@@ -1,10 +1,11 @@
 ---
 title: "情绪架构迁移重构：废弃 EmotionProfile 表，迁移至动态聚合 + Trait 升级链"
 type: feature
-status: completed
+status: archived
 priority: medium
 created_at: 2026-03-03T20:00:00
-updated_at: 2026-03-03T22:00:00
+updated_at: 2026-03-07T13:30:00
+archived_at: 2026-03-07T13:30:00
 ---
 
 # 情绪架构迁移重构

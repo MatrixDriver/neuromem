@@ -1,10 +1,11 @@
 ---
 title: "记忆分类 V2 中期演进功能（P1）"
 type: feature
-status: open
+status: archived
 priority: medium
 created_at: 2026-03-01T20:00:00
-updated_at: 2026-03-03T22:00:00
+updated_at: 2026-03-07T13:30:00
+archived_at: 2026-03-07T13:30:00
 ---
 
 # 记忆分类 V2 中期演进功能（P1）

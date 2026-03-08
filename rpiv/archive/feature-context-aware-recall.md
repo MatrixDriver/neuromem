@@ -1,10 +1,11 @@
 ---
 title: "情境感知自动召回（Context-Aware Recall）"
 type: feature
-status: completed
+status: archived
 priority: high
 created_at: 2026-03-05T11:00:00
-updated_at: 2026-03-05T14:56:00
+updated_at: 2026-03-07T13:30:00
+archived_at: 2026-03-07T13:30:00
 ---
 
 # 情境感知自动召回（Context-Aware Recall）

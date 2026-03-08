@@ -435,7 +435,7 @@ class TestDigestCompat:
         result = await svc.digest("compat_user", [
             {"content": "test fact", "memory_type": "fact", "metadata": {}},
         ])
-        assert "insights" in result
+        assert "traits" in result
         assert "emotion_profile" not in result
 
     @pytest.mark.asyncio
@@ -443,7 +443,7 @@ class TestDigestCompat:
         """digest() 空输入返回空结果。"""
         svc = ReflectionService(db_session, mock_embedding, mock_llm)
         result = await svc.digest("compat_user", [])
-        assert result["insights"] == []
+        assert result["traits"] == []
         assert "emotion_profile" not in result
 
 

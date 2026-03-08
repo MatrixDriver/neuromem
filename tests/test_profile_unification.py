@@ -48,14 +48,14 @@ class MockReflectionLLM(LLMProvider):
 
 
 class MockDigestLLM(LLMProvider):
-    """Mock LLM for digest tests: insight generation only, no emotion profile."""
+    """Mock LLM for digest tests: trait generation only, no emotion profile."""
 
     def __init__(self):
         self.call_count = 0
 
     async def chat(self, messages, temperature=0.1, max_tokens=2048) -> str:
         self.call_count += 1
-        return '{"insights": [{"content": "test insight", "category": "pattern", "source_ids": []}]}'
+        return '{"traits": [{"content": "test trait", "category": "pattern", "source_ids": []}]}'
 
 
 # ---------------------------------------------------------------------------
@@ -623,7 +623,7 @@ class TestDigestNoEmotionProfile:
             result = await nm.digest(user, batch_size=50)
 
             assert "memories_analyzed" in result
-            assert "insights_generated" in result
+            assert "traits_generated" in result
             assert "emotion_profile" not in result
         finally:
             await nm.close()
@@ -726,9 +726,9 @@ class TestDigestNoEmotionProfile:
             mock_llm.call_count = 0
             result = await nm.digest(user, batch_size=50)
 
-            # Should converge: either 0 or processing remaining insights
+            # Should converge: either 0 or processing remaining traits
             assert result["memories_analyzed"] >= 0
             if result["memories_analyzed"] == 0:
-                assert result["insights_generated"] == 0
+                assert result["traits_generated"] == 0
         finally:
             await nm.close()

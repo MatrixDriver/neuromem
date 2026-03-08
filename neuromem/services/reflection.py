@@ -748,29 +748,29 @@ class ReflectionService:
         self,
         user_id: str,
         recent_memories: list[dict],
-        existing_insights: Optional[list[dict]] = None,
+        existing_traits: Optional[list[dict]] = None,
     ) -> dict:
         """Backward-compatible digest entry point.
 
-        Generates pattern/summary insights via LLM and stores as trait(trend).
+        Generates pattern/summary traits via LLM and stores as trait(trend).
 
         Note: New code should use reflect() instead.
         """
         if not recent_memories:
-            return {"insights": []}
+            return {"traits": []}
 
-        insights = await self._generate_insights(user_id, recent_memories, existing_insights)
+        traits = await self._generate_traits(user_id, recent_memories, existing_traits)
 
-        return {"insights": insights}
+        return {"traits": traits}
 
-    async def _generate_insights(
+    async def _generate_traits(
         self,
         user_id: str,
         recent_memories: list[dict],
-        existing_insights: Optional[list[dict]] = None,
+        existing_traits: Optional[list[dict]] = None,
     ) -> list[dict]:
-        """Generate pattern and summary insights (legacy digest behavior)."""
-        prompt = self._build_insight_prompt(recent_memories, existing_insights)
+        """Generate pattern and summary traits (legacy digest behavior)."""
+        prompt = self._build_trait_prompt(recent_memories, existing_traits)
 
         try:
             result_text = await self._llm.chat(
@@ -778,64 +778,64 @@ class ReflectionService:
                 temperature=0.3,
                 max_tokens=2048,
             )
-            insights = self._parse_insight_result(result_text)
+            traits = self._parse_trait_result(result_text)
         except Exception as e:
-            logger.error("Insight generation LLM call failed: %s", e, exc_info=True)
+            logger.error("Trait generation LLM call failed: %s", e, exc_info=True)
             return []
 
-        # Filter valid insights first
-        _MIN_INSIGHT_IMPORTANCE = 7
-        valid_insights = []
-        for insight in insights:
-            content = insight.get("content")
-            category = insight.get("category", "pattern")
-            importance = int(insight.get("importance", 8))
+        # Filter valid traits first
+        _MIN_TRAIT_IMPORTANCE = 7
+        valid_traits = []
+        for trait_item in traits:
+            content = trait_item.get("content")
+            category = trait_item.get("category", "pattern")
+            importance = int(trait_item.get("importance", 8))
             if not content or category not in ("pattern", "summary"):
                 continue
-            if importance < _MIN_INSIGHT_IMPORTANCE:
-                logger.debug("Skipping low-importance insight (importance=%d): %s", importance, content[:60])
+            if importance < _MIN_TRAIT_IMPORTANCE:
+                logger.debug("Skipping low-importance trait (importance=%d): %s", importance, content[:60])
                 continue
-            valid_insights.append(insight)
+            valid_traits.append(trait_item)
 
-        if not valid_insights:
+        if not valid_traits:
             return []
 
-        # Embed all insights in batch
-        contents = [ins["content"] for ins in valid_insights]
+        # Embed all traits in batch
+        contents = [item["content"] for item in valid_traits]
         try:
             vectors = await self._embedding.embed_batch(contents)
         except Exception as e:
-            logger.error("Failed to embed insights batch: %s", e)
+            logger.error("Failed to embed traits batch: %s", e)
             return []
 
         stored = []
-        for insight, vector in zip(valid_insights, vectors):
+        for trait_item, vector in zip(valid_traits, vectors):
             embedding_obj = Memory(
                 user_id=user_id,
-                content=insight["content"],
+                content=trait_item["content"],
                 embedding=vector,
                 memory_type="trait",
                 trait_stage="trend",
                 metadata_={
-                    "category": insight.get("category", "pattern"),
-                    "source_ids": insight.get("source_ids", []),
-                    "importance": int(insight.get("importance", 8)),
+                    "category": trait_item.get("category", "pattern"),
+                    "source_ids": trait_item.get("source_ids", []),
+                    "importance": int(trait_item.get("importance", 8)),
                 },
             )
             self.db.add(embedding_obj)
-            stored.append(insight)
+            stored.append(trait_item)
 
         if stored:
             await self.db.flush()
 
         return stored
 
-    def _build_insight_prompt(
+    def _build_trait_prompt(
         self,
         memories: list[dict],
-        existing_insights: Optional[list[dict]] = None,
+        existing_traits: Optional[list[dict]] = None,
     ) -> str:
-        """Build prompt for generating pattern and summary insights."""
+        """Build prompt for generating pattern and summary traits."""
         memory_lines = []
         for i, m in enumerate(memories):
             content = m.get("content", "")
@@ -845,17 +845,17 @@ class ReflectionService:
         memories_text = "\n".join(memory_lines)
 
         existing_text = ""
-        if existing_insights:
-            recent = existing_insights[-20:]
+        if existing_traits:
+            recent = existing_traits[-20:]
             existing_lines = [f"- {ins.get('content', '')}" for ins in recent]
             existing_text = f"""
-已有洞察（共 {len(existing_insights)} 条，显示最近 {len(recent)} 条）：
+已有洞察（共 {len(existing_traits)} 条，显示最近 {len(recent)} 条）：
 {chr(10).join(existing_lines)}
 
 ⚠️ 严格去重规则：
 - 如果新洞察与已有洞察表达相同或相似的含义，直接跳过，不要输出
 - 只输出已有洞察中**未覆盖**的新角度、新发现、或具体细节的补充
-- 如果本批记忆没有带来新的洞察，返回空列表 {{"insights": []}}
+- 如果本批记忆没有带来新的洞察，返回空列表 {{"traits": []}}
 """
 
         return f"""你是一个记忆分析系统。根据用户的新记忆，生成**增量**行为模式和阶段总结洞察。
@@ -878,7 +878,7 @@ class ReflectionService:
 只返回 JSON，不要其他内容：
 ```json
 {{
-  "insights": [
+  "traits": [
     {{
       "content": "洞察内容（具体、有细节）",
       "category": "pattern|summary",
@@ -889,8 +889,8 @@ class ReflectionService:
 }}
 ```"""
 
-    def _parse_insight_result(self, result_text: str) -> list[dict]:
-        """Parse LLM insight generation output."""
+    def _parse_trait_result(self, result_text: str) -> list[dict]:
+        """Parse LLM trait generation output."""
         try:
             t = result_text.strip()
 
@@ -908,12 +908,12 @@ class ReflectionService:
             if not isinstance(result, dict):
                 return []
 
-            insights = result.get("insights", [])
-            if not isinstance(insights, list):
+            traits = result.get("traits") or result.get("insights", [])
+            if not isinstance(traits, list):
                 return []
 
             valid = []
-            for ins in insights:
+            for ins in traits:
                 if isinstance(ins, dict) and ins.get("content"):
                     valid.append({
                         "content": ins["content"],
@@ -924,10 +924,10 @@ class ReflectionService:
             return valid
 
         except json.JSONDecodeError as e:
-            logger.error("Failed to parse insight JSON: %s", e)
+            logger.error("Failed to parse trait JSON: %s", e)
             return []
         except Exception as e:
-            logger.error("Error parsing insight result: %s", e)
+            logger.error("Error parsing trait result: %s", e)
             return []
 
     @staticmethod

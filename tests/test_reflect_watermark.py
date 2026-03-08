@@ -21,8 +21,8 @@ class MockLLMProvider(LLMProvider):
 
     async def chat(self, messages, temperature=0.1, max_tokens=2048) -> str:
         self.call_count += 1
-        # All calls return insights (emotion profile update removed)
-        return '{"insights": [{"content": "insight #%d", "category": "pattern", "source_ids": []}]}' % self.call_count
+        # All calls return traits (emotion profile update removed)
+        return '{"traits": [{"content": "trait #%d", "category": "pattern", "source_ids": []}]}' % self.call_count
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ async def test_reflect_watermark_initial(mock_embedding, mock_llm):
         result = await nm.digest(user, batch_size=50)
 
         assert result["memories_analyzed"] == 3
-        assert result["insights_generated"] >= 1
+        assert result["traits_generated"] >= 1
 
         # Verify watermark was set in reflection_cycles
         async with nm._db.session() as session:
@@ -134,7 +134,7 @@ async def test_reflect_watermark_no_new_memories(mock_embedding, mock_llm):
         # Eventually converges: either 0 (fully caught up) or processes remaining insights
         assert result["memories_analyzed"] >= 0
         if result["memories_analyzed"] == 0:
-            assert result["insights_generated"] == 0
+            assert result["traits_generated"] == 0
             assert mock_llm.call_count == 0
     finally:
         await nm.close()

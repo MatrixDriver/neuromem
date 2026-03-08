@@ -11,23 +11,23 @@ from neuromem.services.reflection import ReflectionService
 class MockLLMProvider(LLMProvider):
     """Mock LLM that returns predictable reflection results."""
 
-    def __init__(self, insight_response: str = "", emotion_response: str = ""):
-        self._insight_response = insight_response
+    def __init__(self, trait_response: str = "", emotion_response: str = ""):
+        self._trait_response = trait_response
         self._emotion_response = emotion_response
         self._call_count = 0
 
     async def chat(self, messages, temperature=0.1, max_tokens=2048) -> str:
         self._call_count += 1
-        # First call: insight generation, second call: emotion summary
+        # First call: trait generation, second call: emotion summary
         if self._call_count == 1:
-            return self._insight_response
+            return self._trait_response
         else:
             return self._emotion_response
 
 
 @pytest.mark.asyncio
-async def test_reflect_generates_insights(db_session, mock_embedding):
-    """Test that reflection generates pattern and summary insights."""
+async def test_reflect_generates_traits(db_session, mock_embedding):
+    """Test that reflection generates pattern and summary traits."""
     recent_memories = [
         {"content": "在 Google 工作", "memory_type": "fact", "metadata": {}},
         {"content": "主要做后端开发", "memory_type": "fact", "metadata": {}},
@@ -36,9 +36,9 @@ async def test_reflect_generates_insights(db_session, mock_embedding):
     ]
 
     mock_llm = MockLLMProvider(
-        insight_response="""```json
+        trait_response="""```json
 {
-  "insights": [
+  "traits": [
     {
       "content": "用户是一名后端工程师，近期工作压力较大",
       "category": "summary",
@@ -64,11 +64,11 @@ async def test_reflect_generates_insights(db_session, mock_embedding):
     reflection_svc = ReflectionService(db_session, mock_embedding, mock_llm)
     result = await reflection_svc.digest("reflect_user", recent_memories)
 
-    assert "insights" in result
+    assert "traits" in result
     assert "emotion_profile" not in result
-    assert len(result["insights"]) == 2
-    assert result["insights"][0]["category"] == "summary"
-    assert result["insights"][1]["category"] == "pattern"
+    assert len(result["traits"]) == 2
+    assert result["traits"][0]["category"] == "summary"
+    assert result["traits"][1]["category"] == "pattern"
 
 
 @pytest.mark.asyncio
@@ -77,19 +77,19 @@ async def test_reflect_with_no_memories(db_session, mock_embedding):
     mock_llm = MockLLMProvider()
     reflection_svc = ReflectionService(db_session, mock_embedding, mock_llm)
     result = await reflection_svc.digest("empty_user", [])
-    assert result["insights"] == []
+    assert result["traits"] == []
     assert "emotion_profile" not in result
 
 
 @pytest.mark.asyncio
-async def test_reflect_stores_as_insight_type(db_session, mock_embedding):
-    """Test that insights are stored with memory_type='insight'."""
+async def test_reflect_stores_as_trait_type(db_session, mock_embedding):
+    """Test that traits are stored with memory_type='trait'."""
     from sqlalchemy import text
 
     mock_llm = MockLLMProvider(
-        insight_response="""```json
+        trait_response="""```json
 {
-  "insights": [
+  "traits": [
     {
       "content": "用户喜欢编程和技术",
       "category": "pattern",
@@ -105,7 +105,7 @@ async def test_reflect_stores_as_insight_type(db_session, mock_embedding):
     reflection_svc = ReflectionService(db_session, mock_embedding, mock_llm)
     result = await reflection_svc.digest("store_user", memories)
 
-    assert len(result["insights"]) == 1
+    assert len(result["traits"]) == 1
 
     # Verify stored in DB with memory_type='trait' (V2: insight -> trait with trend stage)
     rows = await db_session.execute(
@@ -145,7 +145,7 @@ async def test_reflect_no_longer_updates_emotion_profile(db_session, mock_embedd
     ]
 
     mock_llm = MockLLMProvider(
-        insight_response="""{"insights": []}""",
+        trait_response="""{"traits": []}""",
     )
 
     reflection_svc = ReflectionService(db_session, mock_embedding, mock_llm)
@@ -153,7 +153,7 @@ async def test_reflect_no_longer_updates_emotion_profile(db_session, mock_embedd
 
     # emotion_profile should no longer be in the result
     assert "emotion_profile" not in result
-    assert "insights" in result
+    assert "traits" in result
 
     # Verify emotion_profiles table was NOT written to
     try:
@@ -176,42 +176,42 @@ async def test_reflect_with_no_emotions_skips_profile_update(db_session, mock_em
     ]
 
     mock_llm = MockLLMProvider(
-        insight_response="""{"insights": [{"content": "test", "category": "pattern"}]}""",
+        trait_response="""{"traits": [{"content": "test", "category": "pattern"}]}""",
     )
 
     reflection_svc = ReflectionService(db_session, mock_embedding, mock_llm)
     result = await reflection_svc.digest("no_emotion_user", recent_memories)
 
-    assert result["insights"] is not None
+    assert result["traits"] is not None
     assert "emotion_profile" not in result  # No longer returned
 
 
 @pytest.mark.asyncio
-async def test_parse_insight_result_handles_invalid_json(db_session, mock_embedding):
+async def test_parse_trait_result_handles_invalid_json(db_session, mock_embedding):
     """Test that reflection handles invalid LLM JSON gracefully."""
     mock_llm = MockLLMProvider(
-        insight_response="This is not valid JSON",
+        trait_response="This is not valid JSON",
         emotion_response="{}",
     )
 
     reflection_svc = ReflectionService(db_session, mock_embedding, mock_llm)
     result = await reflection_svc.digest("invalid_user", [{"content": "test", "memory_type": "fact", "metadata": {}}])
 
-    assert result["insights"] == []  # Empty due to parse failure
+    assert result["traits"] == []  # Empty due to parse failure
 
 
 @pytest.mark.asyncio
 async def test_reflect_facade_method(db_session, mock_embedding):
-    """Test NeuroMemory.digest() v0.2.0 - generates insights from existing memories.
+    """Test NeuroMemory.digest() - generates traits from existing memories.
 
-    v0.2.0 behavior: digest() only generates insights and updates emotion profile.
+    digest() only generates traits (formerly insights).
     Basic memory extraction is handled by ingest() when auto_extract=True.
     """
     from neuromem import NeuroMemory
 
     # Create NeuroMemory with LLM and auto_extract disabled for manual control
     mock_llm = MockLLMProvider(
-        insight_response='{"insights": [{"content": "test insight", "category": "pattern"}]}',
+        trait_response='{"traits": [{"content": "test trait", "category": "pattern"}]}',
         emotion_response='{"latest_state": "test state", "dominant_emotions": {}, "emotion_triggers": {}}',
     )
 
@@ -236,17 +236,23 @@ async def test_reflect_facade_method(db_session, mock_embedding):
         metadata={"emotion": {"valence": -0.6, "arousal": 0.7}},
     )
 
-    # digest() generates insights only (emotion_profile removed in Profile Unification)
+    # digest() generates traits only (emotion_profile removed in Profile Unification)
     result = await nm.digest("facade_user", batch_size=10)
 
-    # Check insight generation
-    assert "insights_generated" in result
-    assert "insights" in result
+    # Check trait generation — must use new field names
+    assert "traits_generated" in result
+    assert "traits" in result
+    assert "insights_generated" not in result
+    assert "insights" not in result
     assert "emotion_profile" not in result
     # No longer returns extraction results
     assert "conversations_processed" not in result
     assert "facts_added" not in result
     assert "preferences_updated" not in result
     assert "relations_added" not in result
+
+    # Negative assertion: no insight-prefixed keys
+    insight_keys = [k for k in result.keys() if "insight" in k.lower()]
+    assert insight_keys == [], f"Found insight-related keys: {insight_keys}"
 
     await nm.close()

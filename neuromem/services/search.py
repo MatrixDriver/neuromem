@@ -56,8 +56,6 @@ class SearchService:
         """Add a memory with its embedding vector."""
         if memory_type == "general":
             memory_type = "fact"
-        elif memory_type == "insight":
-            memory_type = "trait"
 
         import hashlib
         from datetime import timezone

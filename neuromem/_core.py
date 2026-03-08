@@ -858,9 +858,6 @@ class NeuroMemory:
         """
         if memory_type == "general":
             memory_type = "fact"
-        elif memory_type == "insight":
-            memory_type = "trait"
-
         from datetime import timezone
         from neuromem.services.search import SearchService
 
@@ -1151,7 +1148,7 @@ class NeuroMemory:
                     elif sentiment_str:
                         entry["content"] = f"{content}. {sentiment_str}"
                 else:
-                    # Facts/insights: timeless attributes, no date prefix needed
+                    # Facts/traits: timeless attributes, no date prefix needed
                     if sentiment_str:
                         entry["content"] = f"{content}. {sentiment_str}"
 
@@ -1701,7 +1698,7 @@ class NeuroMemory:
         batch_size: int = 50,
         background: bool = False,
     ) -> dict | None:
-        """Generate insights from un-digested memories.
+        """Generate traits from un-digested memories.
 
         Uses a watermark (``completed_at`` on ReflectionCycle) to only
         process memories that haven't been analyzed yet.  Internally paginates
@@ -1754,7 +1751,7 @@ class NeuroMemory:
 
         # --- Count un-reflected memories (cheap) ---
         async with self._db.session() as session:
-            where = "user_id = :uid AND memory_type != 'insight'"
+            where = "user_id = :uid AND memory_type != 'trait'"
             params: dict = {"uid": user_id}
             if watermark:
                 where += " AND created_at > :wm"
@@ -1766,12 +1763,12 @@ class NeuroMemory:
         if cnt == 0:
             return {
                 "memories_analyzed": 0,
-                "insights_generated": 0,
-                "insights": [],
+                "traits_generated": 0,
+                "traits": [],
             }
 
-        # --- Seed existing insights for dedup ---
-        existing_insights: list[dict] = []
+        # --- Seed existing traits for dedup ---
+        existing_traits: list[dict] = []
         async with self._db.session() as session:
             result = await session.execute(
                 sql_text("""
@@ -1781,13 +1778,13 @@ class NeuroMemory:
                 """),
                 {"uid": user_id},
             )
-            existing_insights = [
+            existing_traits = [
                 {"content": self._decrypt_content(r.content), "metadata": r.metadata}
                 for r in result.fetchall()
             ]
 
         # --- Paginate through un-reflected memories ---
-        all_insights: list[dict] = []
+        all_traits: list[dict] = []
         total_analyzed = 0
         offset = 0
         max_created_at = watermark  # track new watermark
@@ -1797,7 +1794,7 @@ class NeuroMemory:
         while batch_count < max_batches:
             batch: list[dict] = []
             async with self._db.session() as session:
-                where = "user_id = :uid AND memory_type != 'insight'"
+                where = "user_id = :uid AND memory_type != 'trait'"
                 params = {"uid": user_id, "lim": batch_size, "off": offset}
                 if watermark:
                     where += " AND created_at > :wm"
@@ -1830,20 +1827,20 @@ class NeuroMemory:
             async with self._db.session() as session:
                 svc = ReflectionService(session, self._embedding, self._llm)
                 batch_result = await svc.digest(
-                    user_id, batch, existing_insights or None,
+                    user_id, batch, existing_traits or None,
                 )
 
-            batch_insights = batch_result.get("insights", [])
-            all_insights.extend(batch_insights)
-            for ins in batch_insights:
-                existing_insights.append({
-                    "content": ins.get("content", ""),
-                    "metadata": {"category": ins.get("category", "pattern")},
+            batch_traits = batch_result.get("traits", [])
+            all_traits.extend(batch_traits)
+            for item in batch_traits:
+                existing_traits.append({
+                    "content": item.get("content", ""),
+                    "metadata": {"category": item.get("category", "pattern")},
                 })
 
             logger.info(
-                "Reflect[%s] batch offset=%d: analyzed=%d insights=%d (total=%d/%d)",
-                user_id, offset, len(batch), len(batch_insights), len(all_insights), cnt,
+                "Reflect[%s] batch offset=%d: analyzed=%d traits=%d (total=%d/%d)",
+                user_id, offset, len(batch), len(batch_traits), len(all_traits), cnt,
             )
 
             batch_count += 1
@@ -1866,8 +1863,8 @@ class NeuroMemory:
 
         return {
             "memories_analyzed": total_analyzed,
-            "insights_generated": len(all_insights),
-            "insights": all_insights,
+            "traits_generated": len(all_traits),
+            "traits": all_traits,
         }
 
     # -- Reflection APIs --

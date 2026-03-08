@@ -804,7 +804,7 @@ class TestRecallFullPipeline:
 
     @pytest.mark.asyncio
     async def test_reflect_extracts_and_marks_messages(self, mock_embedding):
-        """v0.2.0: ingest auto-extracts, digest() generates insights."""
+        """v0.2.0: ingest auto-extracts, digest() generates traits."""
         import asyncio
         import uuid
 
@@ -844,10 +844,10 @@ class TestRecallFullPipeline:
             recall_result = await instance.recall(user_id=user_id, query="Google")
             assert len(recall_result["merged"]) > 0
 
-            # v0.2.0: digest() only generates insights (no extraction)
+            # digest() only generates traits (no extraction)
             result = await instance.digest(user_id=user_id, batch_size=50)
-            assert "insights_generated" in result
-            assert "insights" in result
+            assert "traits_generated" in result
+            assert "traits" in result
             assert "emotion_profile" not in result
             # v0.2.0: No longer returns extraction counters
             assert "conversations_processed" not in result
