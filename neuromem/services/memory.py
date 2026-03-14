@@ -352,3 +352,115 @@ class MemoryService:
         await self.db.delete(memory)
         await self.db.flush()
         return True
+
+    async def find_duplicates(
+        self,
+        user_id: str,
+        threshold: float = 0.92,
+        max_pairs: int = 100,
+        days_window: int = 30,
+    ) -> list[dict]:
+        """Find duplicate memory pairs using embedding cosine similarity.
+
+        Only compares recent memories (within days_window) against all memories.
+        Same memory_type required. Traits excluded.
+
+        Returns list of dicts: {id1, content1, type1, importance1, id2, content2, type2, importance2, similarity}
+        """
+        from sqlalchemy import text
+        rows = (await self.db.execute(
+            text("""
+                SELECT
+                    m1.id AS id1, m1.content AS content1, m1.memory_type AS type1,
+                    m1.importance AS importance1, m1.created_at AS created1,
+                    m2.id AS id2, m2.content AS content2, m2.memory_type AS type2,
+                    m2.importance AS importance2, m2.created_at AS created2,
+                    1 - (m1.embedding <=> m2.embedding) AS similarity
+                FROM memories m1
+                JOIN memories m2 ON m1.user_id = m2.user_id
+                    AND m1.id != m2.id
+                    AND m1.memory_type = m2.memory_type
+                WHERE m1.user_id = :uid
+                    AND m1.created_at >= NOW() - MAKE_INTERVAL(days => :days)
+                    AND m1.embedding IS NOT NULL
+                    AND m2.embedding IS NOT NULL
+                    AND m1.memory_type NOT IN ('trait')
+                    AND m2.memory_type NOT IN ('trait')
+                    AND 1 - (m1.embedding <=> m2.embedding) > :threshold
+                ORDER BY similarity DESC
+                LIMIT :max_pairs
+            """),
+            {"uid": user_id, "threshold": threshold, "max_pairs": max_pairs, "days": days_window},
+        )).fetchall()
+
+        return [
+            {
+                "id1": str(r.id1), "content1": r.content1, "type1": r.type1,
+                "importance1": r.importance1 or 0, "created1": r.created1,
+                "id2": str(r.id2), "content2": r.content2, "type2": r.type2,
+                "importance2": r.importance2 or 0, "created2": r.created2,
+                "similarity": round(float(r.similarity), 4),
+            }
+            for r in rows
+        ]
+
+    async def merge_duplicates(
+        self,
+        user_id: str,
+        threshold: float = 0.92,
+        max_pairs: int = 100,
+        days_window: int = 30,
+        dry_run: bool = False,
+    ) -> dict:
+        """Find and merge duplicate memories. Keeps higher importance (or newer).
+
+        Returns: {duplicates_found, merged_count, kept_ids, deleted_ids}
+        """
+        pairs = await self.find_duplicates(user_id, threshold, max_pairs, days_window)
+
+        if not pairs:
+            return {"duplicates_found": 0, "merged_count": 0, "kept_ids": [], "deleted_ids": []}
+
+        processed = set()
+        kept_ids = []
+        deleted_ids = []
+
+        for pair in pairs:
+            id1, id2 = pair["id1"], pair["id2"]
+            if id1 in processed or id2 in processed:
+                continue
+
+            if pair["importance1"] > pair["importance2"]:
+                keep_id, delete_id = id1, id2
+            elif pair["importance2"] > pair["importance1"]:
+                keep_id, delete_id = id2, id1
+            else:
+                # Same importance — keep newer
+                if pair["created1"] and pair["created2"] and pair["created1"] >= pair["created2"]:
+                    keep_id, delete_id = id1, id2
+                else:
+                    keep_id, delete_id = id2, id1
+
+            kept_ids.append(keep_id)
+            deleted_ids.append(delete_id)
+            processed.add(id1)
+            processed.add(id2)
+
+        if dry_run:
+            return {
+                "duplicates_found": len(pairs),
+                "merged_count": 0,
+                "would_delete": len(deleted_ids),
+                "kept_ids": kept_ids,
+                "deleted_ids": deleted_ids,
+            }
+
+        for did in deleted_ids:
+            await self.delete_memory(did, user_id)
+
+        return {
+            "duplicates_found": len(pairs),
+            "merged_count": len(deleted_ids),
+            "kept_ids": kept_ids,
+            "deleted_ids": deleted_ids,
+        }

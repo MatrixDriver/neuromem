@@ -539,6 +539,161 @@ class NeuroMemory:
             user_id, role, content, session_id, metadata, auto_extract=auto_extract,
         )
 
+    async def ingest_window(
+        self,
+        user_id: str,
+        messages: list[dict],
+        previous_summary: str = "",
+    ) -> dict:
+        """Extract memories from a window of messages (sliding window mode).
+
+        Unlike single-message ingest(), this processes multiple messages together,
+        preserving conversational context for better extraction quality.
+
+        Args:
+            user_id: User identifier
+            messages: List of dicts with 'content' and 'role' keys
+            previous_summary: Summary from previous window for context continuity
+
+        Returns:
+            dict with: facts_stored, episodes_stored, triples_stored, procedural_stored, summary
+        """
+        if not messages:
+            return {"facts_stored": 0, "episodes_stored": 0, "triples_stored": 0,
+                    "procedural_stored": 0, "summary": previous_summary}
+
+        # Build extraction prompt
+        msg_text = "\n\n".join(f"[{m.get('role', 'user')}]: {m.get('content', '')}" for m in messages)
+
+        # Detect language
+        chinese_chars = sum(1 for c in msg_text if '\u4e00' <= c <= '\u9fff')
+        use_chinese = chinese_chars > len(msg_text) * 0.1
+
+        prompt = self._build_window_prompt(msg_text, previous_summary, use_chinese)
+
+        # Call LLM
+        response = await self._llm.chat([{"role": "user", "content": prompt}])
+        text = response if isinstance(response, str) else str(response)
+
+        # Parse JSON from response
+        import json
+        json_start = text.find("{")
+        json_end = text.rfind("}") + 1
+        if json_start < 0 or json_end <= json_start:
+            raise ValueError(f"No JSON found in LLM response for window extraction")
+        data = json.loads(text[json_start:json_end])
+
+        # Store extracted data using existing services
+        from neuromem.services.memory_extraction import MemoryExtractionService
+
+        result = {"facts_stored": 0, "episodes_stored": 0, "triples_stored": 0, "procedural_stored": 0}
+
+        async with self._db.session() as session:
+            svc = MemoryExtractionService(session, self._embedding, self._llm, graph_enabled=self._graph_enabled)
+
+            facts = data.get("facts", [])
+            episodes = data.get("episodes", [])
+            triples = data.get("triples", [])
+            procedural = data.get("procedural", [])
+
+            if facts:
+                valid_facts = [f for f in facts if (f.get("content") if isinstance(f, dict) else f)]
+                result["facts_stored"] = await svc._store_facts(user_id, valid_facts)
+
+            if episodes:
+                valid_episodes = [e for e in episodes if (e.get("content") if isinstance(e, dict) else e)]
+                result["episodes_stored"] = await svc._store_episodes(user_id, valid_episodes)
+
+            if triples:
+                result["triples_stored"] = await svc._store_triples(user_id, triples)
+
+            if procedural:
+                from neuromem.services.search import SearchService
+                search_svc = SearchService(session, self._embedding)
+                for item in procedural:
+                    content = item if isinstance(item, str) else item.get("content", "")
+                    if content:
+                        await search_svc.add_memory(user_id, content, memory_type="procedural")
+                        result["procedural_stored"] += 1
+
+        # Extract summary
+        summary = data.get("summary", "")
+        if not summary:
+            items = []
+            for f in data.get("facts", [])[:5]:
+                c = f if isinstance(f, str) else f.get("content", "")
+                if c: items.append(c)
+            summary = "; ".join(items[:5])
+
+        result["summary"] = summary
+
+        # Call extraction callback if set
+        if self._on_extraction:
+            try:
+                cb_result = self._on_extraction(result)
+                if hasattr(cb_result, "__await__"):
+                    await cb_result
+            except Exception:
+                pass
+
+        return result
+
+    def _build_window_prompt(self, msg_text: str, previous_summary: str, use_chinese: bool) -> str:
+        """Build extraction prompt for window of messages."""
+        if use_chinese:
+            return self._build_zh_window_prompt(msg_text, previous_summary)
+        return self._build_en_window_prompt(msg_text, previous_summary)
+
+    def _build_en_window_prompt(self, msg_text: str, previous_summary: str) -> str:
+        ctx = f"\n## Previous context:\n{previous_summary}\n" if previous_summary else ""
+        return f"""Extract structured memory information from the following conversation.
+{ctx}
+## Conversation:
+{msg_text}
+
+## Instructions:
+Extract these categories. Each memory MUST be self-contained — resolve all pronouns using context.
+
+1. **Facts**: Persistent attributes (occupation, hobbies, preferences, relationships)
+   Format: {{"content": "description", "category": "identity|work|skill|hobby|personal|education|location|health|relationship|finance|values", "importance": 1-10}}
+
+2. **Episodes**: Events, experiences, temporal occurrences
+   Format: {{"content": "description", "timestamp": "ISO date or null", "importance": 1-10}}
+
+3. **Procedural**: Work instructions, commands, patterns, configuration
+   Format: {{"content": "description", "category": "workflow|tool_usage|coding_pattern|configuration|process"}}
+
+4. **Triples**: Entity-relation-entity knowledge graph edges
+   Format: {{"subject": "entity", "relation": "relation_type", "object": "entity"}}
+
+Return JSON only:
+{{"facts": [...], "episodes": [...], "procedural": [...], "triples": [...], "summary": "Brief summary of key information for next window (max 100 words)"}}"""
+
+    def _build_zh_window_prompt(self, msg_text: str, previous_summary: str) -> str:
+        ctx = f"\n## 上一窗口上下文：\n{previous_summary}\n" if previous_summary else ""
+        return f"""从以下对话中提取结构化记忆信息。
+{ctx}
+## 对话内容：
+{msg_text}
+
+## 提取要求：
+每条记忆必须自包含——使用上下文解析所有代词，不要使用"他"、"她"、"那个项目"等没有具体指代的表述。
+
+1. **事实**：持久性属性（职业、爱好、偏好、关系）
+   格式：{{"content": "描述", "category": "identity|work|skill|hobby|personal|education|location|health|relationship|finance|values", "importance": 1-10}}
+
+2. **事件**：发生过的事件、经历、时间相关信息
+   格式：{{"content": "描述", "timestamp": "ISO日期或null", "importance": 1-10}}
+
+3. **过程**：工作指令、命令、模式、配置
+   格式：{{"content": "描述", "category": "workflow|tool_usage|coding_pattern|configuration|process"}}
+
+4. **三元组**：实体-关系-实体知识图谱边
+   格式：{{"subject": "实体", "relation": "关系类型", "object": "实体"}}
+
+仅返回JSON：
+{{"facts": [...], "episodes": [...], "procedural": [...], "triples": [...], "summary": "关键信息摘要，供下一窗口使用（最多100字）"}}"""
+
     # -- Dynamic configuration properties --
 
     @property
