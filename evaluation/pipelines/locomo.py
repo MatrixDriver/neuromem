@@ -146,6 +146,11 @@ async def _ingest_conversation(
         await set_timestamps(nm, user_a, sid_a, ts)
         await set_timestamps(nm, user_b, sid_b, ts)
 
+    # Flush remaining window buffers (window extraction mode)
+    if nm._extraction_mode == "window":
+        await nm.flush_window(user_a)
+        await nm.flush_window(user_b)
+
     # Retry any failed extractions before digesting
     for uid in [user_a, user_b]:
         retry_stats = await nm.retry_failed_extractions(user_id=uid)

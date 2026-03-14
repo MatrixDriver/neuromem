@@ -443,10 +443,16 @@ class NeuroMemory:
         on_extraction: Callable[[dict], Any] | None = None,
         on_llm_call: Callable[[dict], Any] | None = None,
         on_embedding_call: Callable[[dict], Any] | None = None,
+        extraction_mode: str = "per_message",
+        window_token_threshold: int = 3000,
         encryption=None,
     ):
         """
         Args:
+            extraction_mode: "per_message" (default) or "window". In window mode,
+                ingest() buffers messages and triggers sliding-window extraction
+                via ingest_window() when the buffer exceeds window_token_threshold.
+            window_token_threshold: Token count threshold for window mode auto-flush.
             reflection_interval: Trigger background digest() every N user messages per user.
                 Default 20: runs digest in the background after every 20 user messages.
                 0 = disabled. Never blocks ingest(). Requires llm.
@@ -487,6 +493,11 @@ class NeuroMemory:
         self._active_sessions: set[tuple[str, str]] = set()
         self._digest_counts: dict[str, int] = {}      # user_id -> count for reflection_interval
         self._user_tasks: dict[str, list[asyncio.Task]] = {}  # per-user background tasks (cancel/await on close)
+
+        # Window extraction mode
+        self._extraction_mode = extraction_mode
+        self._window_token_threshold = window_token_threshold
+        self._window_buffers: dict[str, dict] = {}  # user_id -> {messages, total_tokens, previous_summary}
 
         # Embedding cache for query deduplication (reduces API calls)
         self._embedding_cache: OrderedDict[str, list[float]] = OrderedDict()
@@ -534,10 +545,27 @@ class NeuroMemory:
         metadata: dict | None = None,
         auto_extract: bool | None = None,
     ):
-        """Add a conversation message (shortcut for conversations.ingest)."""
-        return await self.conversations.ingest(
-            user_id, role, content, session_id, metadata, auto_extract=auto_extract,
+        """Add a conversation message (shortcut for conversations.ingest).
+
+        In window mode (extraction_mode="window"), messages are stored with
+        auto_extract=False and buffered internally. When the buffer exceeds
+        window_token_threshold, ingest_window() is called automatically.
+        """
+        # In window mode, override auto_extract to False unless caller explicitly set it
+        if self._extraction_mode == "window" and auto_extract is None:
+            effective_auto = False
+        else:
+            effective_auto = auto_extract
+
+        result = await self.conversations.ingest(
+            user_id, role, content, session_id, metadata, auto_extract=effective_auto,
         )
+
+        # Buffer for window extraction
+        if self._extraction_mode == "window" and effective_auto is False and auto_extract is None:
+            await self._buffer_for_window(user_id, content, role)
+
+        return result
 
     async def ingest_window(
         self,
@@ -637,6 +665,72 @@ class NeuroMemory:
                 pass
 
         return result
+
+    # -- Window extraction buffering --
+
+    @staticmethod
+    def _estimate_tokens(content: str) -> int:
+        """Rough token estimate: word-count for English, char/3 for Chinese-heavy text."""
+        chinese_chars = sum(1 for c in content if '\u4e00' <= c <= '\u9fff')
+        if chinese_chars > len(content) * 0.1:
+            return max(1, len(content) // 3)
+        return max(1, len(content.split()))
+
+    async def _buffer_for_window(self, user_id: str, content: str, role: str) -> None:
+        """Add a message to the per-user window buffer; auto-flush if threshold reached."""
+        tokens = self._estimate_tokens(content)
+        if user_id not in self._window_buffers:
+            self._window_buffers[user_id] = {
+                "messages": [],
+                "total_tokens": 0,
+                "previous_summary": "",
+            }
+        buf = self._window_buffers[user_id]
+        buf["messages"].append({"content": content, "role": role})
+        # Only count user messages toward the threshold (assistant replies
+        # are context but shouldn't trigger extraction on their own)
+        if role == "user":
+            buf["total_tokens"] += tokens
+
+        if buf["total_tokens"] >= self._window_token_threshold:
+            await self._flush_window(user_id)
+
+    async def _flush_window(self, user_id: str) -> dict | None:
+        """Internal: flush buffer via ingest_window and reset."""
+        buf = self._window_buffers.get(user_id)
+        if not buf or not buf["messages"]:
+            return None
+        result = await self.ingest_window(
+            user_id=user_id,
+            messages=buf["messages"],
+            previous_summary=buf["previous_summary"],
+        )
+        buf["messages"] = []
+        buf["total_tokens"] = 0
+        buf["previous_summary"] = result.get("summary", "")
+        return result
+
+    async def flush_window(self, user_id: str) -> dict | None:
+        """Flush the window buffer for a user, triggering extraction on remaining messages.
+
+        No-op if extraction_mode is not "window" or the buffer is empty.
+        """
+        if self._extraction_mode != "window":
+            return None
+        buf = self._window_buffers.get(user_id)
+        if not buf or not buf["messages"]:
+            return None
+        return await self._flush_window(user_id)
+
+    async def flush_all_windows(self) -> int:
+        """Flush all user window buffers. Call before closing to avoid data loss."""
+        count = 0
+        for user_id in list(self._window_buffers.keys()):
+            buf = self._window_buffers.get(user_id)
+            if buf and buf["messages"]:
+                await self._flush_window(user_id)
+                count += 1
+        return count
 
     def _build_window_prompt(self, msg_text: str, previous_summary: str, use_chinese: bool) -> str:
         """Build extraction prompt for window of messages."""
@@ -826,6 +920,10 @@ Return JSON only:
                 await self._do_extraction(user_id, session_id)
         self._active_sessions.clear()
         self._msg_counts.clear()
+
+        # Flush remaining window buffers before closing
+        if self._extraction_mode == "window":
+            await self.flush_all_windows()
 
         # Await all pending background tasks before closing DB
         all_tasks = [t for tasks in self._user_tasks.values() for t in tasks if not t.done()]

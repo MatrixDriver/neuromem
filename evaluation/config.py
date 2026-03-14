@@ -102,6 +102,11 @@ class EvalConfig:
         default_factory=lambda: os.environ.get("EXCLUDE_PROFILE", "0") == "1"
     )
 
+    # Extraction mode: "per_message" (default) or "window" (sliding window)
+    extraction_mode: str = field(
+        default_factory=lambda: os.environ.get("EXTRACTION_MODE", "per_message")
+    )
+
     # Optional separate LLM for answer generation (e.g. deepseek-reasoner)
     answer_llm_model: str = field(
         default_factory=lambda: os.environ.get("ANSWER_LLM_MODEL", "")

@@ -53,6 +53,7 @@ def create_nm(cfg: EvalConfig) -> NeuroMemory:
         llm=llm,
         graph_enabled=cfg.graph_enabled,
         reflection_interval=cfg.reflection_interval,
+        extraction_mode=cfg.extraction_mode,
         pool_size=20,
     )
 
