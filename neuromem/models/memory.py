@@ -85,7 +85,7 @@ class Memory(Base, TimestampMixin):
     source_episode_ids: Mapped[list | None] = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
 
     __table_args__ = (
-        CheckConstraint("memory_type IN ('fact', 'episodic', 'trait', 'document')", name="chk_memory_type"),
+        CheckConstraint("memory_type IN ('fact', 'episodic', 'trait', 'document', 'procedural')", name="chk_memory_type"),
         Index("ix_mem_user", "user_id"),
         Index("ix_mem_user_ts", "user_id", "extracted_timestamp"),
         Index("ix_mem_type_user", "user_id", "memory_type"),

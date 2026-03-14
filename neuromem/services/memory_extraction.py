@@ -943,6 +943,16 @@ Return format (JSON only, no other content):
                 context = _validate_context(episode.get("context"))
 
                 now = datetime.now(timezone.utc)
+
+                # Use episode timestamp as valid_from if available
+                episode_valid_from = now
+                raw_ts = episode.get("timestamp")
+                if raw_ts and isinstance(raw_ts, str):
+                    try:
+                        episode_valid_from = datetime.fromisoformat(raw_ts)
+                    except (ValueError, TypeError):
+                        pass  # unparseable, fall back to now
+
                 embedding_obj = Memory(
                     user_id=user_id,
                     content=content,
@@ -950,9 +960,9 @@ Return format (JSON only, no other content):
                     memory_type="episodic",
                     metadata_=meta,
                     extracted_timestamp=resolved_ts,
-                    valid_from=now,
+                    valid_from=episode_valid_from,
                     content_hash=content_hash,
-                    valid_at=now,
+                    valid_at=episode_valid_from,
                     trait_context=context,
                 )
                 self.db.add(embedding_obj)

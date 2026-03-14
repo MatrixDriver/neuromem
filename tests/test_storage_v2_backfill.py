@@ -32,7 +32,7 @@ async def _enable_memory_type_check(conn):
     """Re-enable chk_memory_type constraint."""
     await conn.execute(text(
         "ALTER TABLE memories ADD CONSTRAINT chk_memory_type "
-        "CHECK (memory_type IN ('fact', 'episodic', 'trait', 'document')) NOT VALID"
+        "CHECK (memory_type IN ('fact', 'episodic', 'trait', 'document', 'procedural')) NOT VALID"
     ))
 
 

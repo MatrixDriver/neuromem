@@ -192,7 +192,7 @@ class Database:
             await conn.execute(text("""
                 DO $$ BEGIN
                   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_memory_type') THEN
-                    ALTER TABLE memories ADD CONSTRAINT chk_memory_type CHECK (memory_type IN ('fact', 'episodic', 'trait', 'document'));
+                    ALTER TABLE memories ADD CONSTRAINT chk_memory_type CHECK (memory_type IN ('fact', 'episodic', 'trait', 'document', 'procedural'));
                   END IF;
                 END $$;
             """))

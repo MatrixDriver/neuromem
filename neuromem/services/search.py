@@ -139,11 +139,11 @@ class SearchService:
             params["created_before"] = created_before
 
         if event_after:
-            filters += " AND extracted_timestamp >= :event_after"
+            filters += " AND COALESCE(valid_from, extracted_timestamp, created_at) >= :event_after"
             params["event_after"] = event_after
 
         if event_before:
-            filters += " AND extracted_timestamp <= :event_before"
+            filters += " AND COALESCE(valid_from, extracted_timestamp, created_at) <= :event_before"
             params["event_before"] = event_before
 
         if as_of is not None:
@@ -392,18 +392,24 @@ class SearchService:
                    vector_score AS relevance,
                    bm25_score,
                    rrf_score,
-                   -- recency_bonus: 0~0.15
-                   0.15 * EXP(
-                       -EXTRACT(EPOCH FROM (NOW() - COALESCE((metadata->>'event_time')::timestamp, created_at)))
-                       / (:decay_rate * (1 + COALESCE((metadata->'emotion'->>'arousal')::float, 0) * 0.5))
-                   ) AS recency,
+                   -- recency_bonus: 0~0.15, with 7-day protection
+                   CASE
+                       WHEN EXTRACT(EPOCH FROM (NOW() - COALESCE((metadata->>'event_time')::timestamp, created_at))) < 604800
+                       THEN 0.15
+                       ELSE 0.15 * EXP(
+                           -EXTRACT(EPOCH FROM (NOW() - COALESCE((metadata->>'event_time')::timestamp, created_at)))
+                           / (:decay_rate * (1 + COALESCE((metadata->'emotion'->>'arousal')::float, 0) * 0.5))
+                       )
+                   END AS recency,
                    -- importance_bonus: 0~0.15
                    0.15 * COALESCE((metadata->>'importance')::float / 10.0, 0.5) AS importance,
+                   -- access_boost: 0~0.10, logarithmic based on access_count
+                   0.10 * LEAST(LN(GREATEST(access_count, 0) + 1) / LN(101), 1.0) AS access_boost,
                    -- emotion_match_bonus: 0~0.10
                    {emotion_bonus_sql} AS emotion_match,
                    -- context_match_bonus: 0~0.10
                    {context_bonus_sql} AS context_match,
-                   -- final score: prospective_penalty × base_relevance × (1 + recency + importance + trait_boost + emotion_match)
+                   -- final score: prospective_penalty × base_relevance × (1 + recency + importance + access_boost + trait_boost + emotion_match)
                    CASE
                        WHEN metadata->>'temporality' = 'prospective'
                             AND (metadata->>'event_time') IS NOT NULL
@@ -414,11 +420,16 @@ class SearchService:
                    *
                    LEAST(vector_score + CASE WHEN bm25_score > 0 THEN 0.05 ELSE 0 END, 1.0)
                    * (1.0
-                      + 0.15 * EXP(
-                          -EXTRACT(EPOCH FROM (NOW() - COALESCE((metadata->>'event_time')::timestamp, created_at)))
-                          / (:decay_rate * (1 + COALESCE((metadata->'emotion'->>'arousal')::float, 0) * 0.5))
-                      )
+                      + CASE
+                          WHEN EXTRACT(EPOCH FROM (NOW() - COALESCE((metadata->>'event_time')::timestamp, created_at))) < 604800
+                          THEN 0.15
+                          ELSE 0.15 * EXP(
+                              -EXTRACT(EPOCH FROM (NOW() - COALESCE((metadata->>'event_time')::timestamp, created_at)))
+                              / (:decay_rate * (1 + COALESCE((metadata->'emotion'->>'arousal')::float, 0) * 0.5))
+                          )
+                        END
                       + 0.15 * COALESCE((metadata->>'importance')::float / 10.0, 0.5)
+                      + 0.10 * LEAST(LN(GREATEST(access_count, 0) + 1) / LN(101), 1.0)
                       + CASE
                           WHEN memory_type = 'trait' THEN
                               CASE trait_stage
@@ -454,6 +465,7 @@ class SearchService:
                 "rrf_score": round(float(row.rrf_score), 4),
                 "recency": round(float(row.recency), 4),
                 "importance": round(float(row.importance), 4),
+                "access_boost": round(float(row.access_boost), 4),
                 "emotion_match": round(float(row.emotion_match), 4),
                 "context_match": round(float(row.context_match), 4),
                 "score": round(float(row.score), 4),
