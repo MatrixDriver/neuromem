@@ -2246,6 +2246,14 @@ Return JSON only:
         """
         return await self.update_memory(trait_id, user_id, content=content)
 
+    async def feedback_trait(self, trait_id: str, user_id: str, useful: bool) -> dict | None:
+        """Record user feedback on a trait (useful/not useful)."""
+        from neuromem.services.memory import MemoryService
+        async with self._db.session() as session:
+            svc = MemoryService(session)
+            result = await svc.feedback_trait(trait_id, user_id, useful)
+        return result
+
     # -- Working Memory API --
 
     async def commit_working_memory(

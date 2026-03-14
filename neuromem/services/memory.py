@@ -353,6 +353,46 @@ class MemoryService:
         await self.db.flush()
         return True
 
+    async def feedback_trait(
+        self,
+        trait_id: str,
+        user_id: str,
+        useful: bool,
+    ) -> dict:
+        """Record user feedback on a trait.
+
+        useful=True: increment reinforcement_count, boost confidence by 0.05 (cap at 1.0)
+        useful=False: increment contradiction_count, reduce confidence by 0.05 (floor at 0.0)
+
+        Returns: {trait_id, useful, reinforcement_count, contradiction_count, confidence}
+        """
+        from sqlalchemy import select
+
+        memory = (await self.db.execute(
+            select(Memory).where(Memory.id == trait_id, Memory.user_id == user_id, Memory.memory_type == "trait")
+        )).scalar_one_or_none()
+
+        if not memory:
+            return None
+
+        current_confidence = 0.5 if memory.trait_confidence is None else memory.trait_confidence
+        if useful:
+            memory.trait_reinforcement_count = (memory.trait_reinforcement_count or 0) + 1
+            memory.trait_confidence = min(1.0, current_confidence + 0.05)
+        else:
+            memory.trait_contradiction_count = (memory.trait_contradiction_count or 0) + 1
+            memory.trait_confidence = max(0.0, current_confidence - 0.05)
+
+        await self.db.flush()
+
+        return {
+            "trait_id": str(memory.id),
+            "useful": useful,
+            "reinforcement_count": memory.trait_reinforcement_count,
+            "contradiction_count": memory.trait_contradiction_count,
+            "confidence": round(memory.trait_confidence, 4),
+        }
+
     async def find_duplicates(
         self,
         user_id: str,
