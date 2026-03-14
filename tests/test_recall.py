@@ -376,8 +376,8 @@ class TestRecallCombinedScoring:
 
         r1 = await svc.scored_search(user_id="combo_u4", query="idempotent")
         r2 = await svc.scored_search(user_id="combo_u4", query="idempotent")
-        # Scores should be identical (time diff is negligible within same test)
-        assert abs(r1[0]["score"] - r2[0]["score"]) < 0.001
+        # Scores may differ slightly due to access_count boost (incremented after each recall)
+        assert abs(r1[0]["score"] - r2[0]["score"]) < 0.02
 
 
 # ===========================================================================
