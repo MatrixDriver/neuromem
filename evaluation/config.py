@@ -118,6 +118,14 @@ class EvalConfig:
         default_factory=lambda: os.environ.get("ANSWER_LLM_BASE_URL", "")
     )
 
+    # Window extraction settings
+    extraction_mode: str = field(
+        default_factory=lambda: os.environ.get("EXTRACTION_MODE", "per_message")
+    )
+    window_char_threshold: int = field(
+        default_factory=lambda: int(os.environ.get("WINDOW_CHAR_THRESHOLD", "1500"))
+    )
+
     # Parallelism settings
     ingest_concurrency: int = field(
         default_factory=lambda: int(os.environ.get("INGEST_CONCURRENCY", "2"))

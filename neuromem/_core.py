@@ -444,15 +444,15 @@ class NeuroMemory:
         on_llm_call: Callable[[dict], Any] | None = None,
         on_embedding_call: Callable[[dict], Any] | None = None,
         extraction_mode: str = "per_message",
-        window_token_threshold: int = 3000,
+        window_char_threshold: int = 1500,
         encryption=None,
     ):
         """
         Args:
             extraction_mode: "per_message" (default) or "window". In window mode,
                 ingest() buffers messages and triggers sliding-window extraction
-                via ingest_window() when the buffer exceeds window_token_threshold.
-            window_token_threshold: Token count threshold for window mode auto-flush.
+                via ingest_window() when the buffer exceeds window_char_threshold.
+            window_char_threshold: Token count threshold for window mode auto-flush.
             reflection_interval: Trigger background digest() every N user messages per user.
                 Default 20: runs digest in the background after every 20 user messages.
                 0 = disabled. Never blocks ingest(). Requires llm.
@@ -496,8 +496,8 @@ class NeuroMemory:
 
         # Window extraction mode
         self._extraction_mode = extraction_mode
-        self._window_token_threshold = window_token_threshold
-        self._window_buffers: dict[str, dict] = {}  # user_id -> {messages, total_tokens, previous_summary}
+        self._window_char_threshold = window_char_threshold
+        self._window_buffers: dict[str, dict] = {}  # user_id -> {messages, total_chars, previous_summary}
 
         # Embedding cache for query deduplication (reduces API calls)
         self._embedding_cache: OrderedDict[str, list[float]] = OrderedDict()
@@ -549,7 +549,7 @@ class NeuroMemory:
 
         In window mode (extraction_mode="window"), messages are stored with
         auto_extract=False and buffered internally. When the buffer exceeds
-        window_token_threshold, ingest_window() is called automatically.
+        window_char_threshold, ingest_window() is called automatically.
         """
         # In window mode, override auto_extract to False unless caller explicitly set it
         if self._extraction_mode == "window" and auto_extract is None:
@@ -669,20 +669,17 @@ class NeuroMemory:
     # -- Window extraction buffering --
 
     @staticmethod
-    def _estimate_tokens(content: str) -> int:
-        """Rough token estimate: word-count for English, char/3 for Chinese-heavy text."""
-        chinese_chars = sum(1 for c in content if '\u4e00' <= c <= '\u9fff')
-        if chinese_chars > len(content) * 0.1:
-            return max(1, len(content) // 3)
-        return max(1, len(content.split()))
+    def _estimate_chars(content: str) -> int:
+        """Return character count for window threshold comparison."""
+        return len(content)
 
     async def _buffer_for_window(self, user_id: str, content: str, role: str) -> None:
         """Add a message to the per-user window buffer; auto-flush if threshold reached."""
-        tokens = self._estimate_tokens(content)
+        tokens = self._estimate_chars(content)
         if user_id not in self._window_buffers:
             self._window_buffers[user_id] = {
                 "messages": [],
-                "total_tokens": 0,
+                "total_chars": 0,
                 "previous_summary": "",
             }
         buf = self._window_buffers[user_id]
@@ -690,9 +687,9 @@ class NeuroMemory:
         # Only count user messages toward the threshold (assistant replies
         # are context but shouldn't trigger extraction on their own)
         if role == "user":
-            buf["total_tokens"] += tokens
+            buf["total_chars"] += tokens
 
-        if buf["total_tokens"] >= self._window_token_threshold:
+        if buf["total_chars"] >= self._window_char_threshold:
             await self._flush_window(user_id)
 
     async def _flush_window(self, user_id: str) -> dict | None:
@@ -706,7 +703,7 @@ class NeuroMemory:
             previous_summary=buf["previous_summary"],
         )
         buf["messages"] = []
-        buf["total_tokens"] = 0
+        buf["total_chars"] = 0
         buf["previous_summary"] = result.get("summary", "")
         return result
 
