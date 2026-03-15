@@ -123,7 +123,7 @@ class EvalConfig:
         default_factory=lambda: os.environ.get("EXTRACTION_MODE", "per_message")
     )
     window_char_threshold: int = field(
-        default_factory=lambda: int(os.environ.get("WINDOW_CHAR_THRESHOLD", "1500"))
+        default_factory=lambda: int(os.environ.get("WINDOW_CHAR_THRESHOLD", "500"))
     )
 
     # Parallelism settings

@@ -444,7 +444,7 @@ class NeuroMemory:
         on_llm_call: Callable[[dict], Any] | None = None,
         on_embedding_call: Callable[[dict], Any] | None = None,
         extraction_mode: str = "per_message",
-        window_char_threshold: int = 1500,
+        window_char_threshold: int = 500,
         encryption=None,
     ):
         """
