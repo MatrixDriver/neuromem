@@ -1,8 +1,8 @@
 # neuromem API 参考文档
 
-> **版本**: 0.6.x
+> **版本**: 0.11.x
 > **Python**: 3.12+
-> **最后更新**: 2026-02-24
+> **最后更新**: 2026-03-16
 
 ---
 
@@ -37,6 +37,7 @@ nm = NeuroMemory(
     storage: ObjectStorage | None = None,
     auto_extract: bool = True,
     graph_enabled: bool = False,
+    extraction_mode: str = "default",
     pool_size: int = 10,
     echo: bool = False,
     reflection_interval: int = 20,
@@ -54,6 +55,7 @@ nm = NeuroMemory(
 | `auto_extract` | `bool` | ❌ | 是否自动提取记忆（每次 `ingest()` 时），默认 `True` |
 | `reflection_interval` | `int` | ❌ | 每 N 次提取后自动在后台运行 `digest()`（0 = 禁用，默认 `20`）。需要配置 `llm`。 |
 | `graph_enabled` | `bool` | ❌ | 是否启用图数据库（关系表实现），默认 False |
+| `extraction_mode` | `str` | ❌ | 提取模式：`"default"`（默认，逐条提取）或 `"window"`（滑动窗口提取） |
 | `pool_size` | `int` | ❌ | 数据库连接池大小，默认 10 |
 | `echo` | `bool` | ❌ | 是否输出 SQL 日志，默认 `False`（调试用） |
 | `on_extraction` | `Callable` | ❌ | 提取完成回调，接收 dict（含 user_id, session_id, duration, facts_extracted 等）。支持同步和异步函数。 |
@@ -83,7 +85,7 @@ async with NeuroMemory(
     auto_extract=False,  # 关闭自动提取
 ) as nm:
     await nm.ingest(user_id="alice", role="user", content="I work at Google")
-    await nm.digest(user_id="alice")  # 手动触发：提取记忆 + 生成洞察
+    await nm.digest(user_id="alice")  # 手动触发：提取记忆 + 生成特质
 ```
 
 ### 动态配置
@@ -107,7 +109,7 @@ neuromem 的公共 API 围绕三个核心操作：
 |-----|------|------|
 | **ingest()** ⭐ | 存储对话消息 + 自动提取记忆 | 对话驱动，LLM 自动提取 facts/episodes/relations |
 | **recall()** ⭐ | 智能混合检索 | 三因子向量（相关性x时效x重要性）+ 图实体检索 + 去重 |
-| **digest()** ⭐ | 生成洞察 + 更新画像 | 定期调用，分析记忆、提炼洞察 |
+| **digest()** ⭐ | 生成特质 + 更新画像 | 定期调用，9 步反思引擎、特质生成与升级、矛盾检测 |
 
 **示例**：
 ```python
@@ -122,9 +124,9 @@ await nm.ingest(user_id="alice", role="user",
 result = await nm.recall(user_id="alice", query="工作")
 # → "昨天面试 Google"（最近 + 重要）优先于 "去年在微软实习"（久远）
 
-# 3. 定期调用，生成洞察
+# 3. 定期调用，生成特质
 result = await nm.digest(user_id="alice")
-# → 洞察: "用户近期求职，面试了 Google 和微软"
+# → 特质: "用户是技术从业者" (behavior → preference → core 升级链)
 # → 画像: 更新情感状态
 ```
 
@@ -192,8 +194,8 @@ await nm.ingest(
     content=reply
 )
 
-# 5. 定期生成洞察（可选）
-# await nm.digest(user_id="alice")  # 生成行为模式和阶段总结
+# 5. 定期生成特质（可选）
+# await nm.digest(user_id="alice")  # 生成特质（behavior/preference/core）
 ```
 
 **使用场景**：
@@ -255,7 +257,7 @@ result = await nm.recall(
 | `limit` | `int` | `20` | 返回结果数量 |
 | `decay_rate` | `float` | `86400*30` | 时间衰减率（秒），30 天 |
 | `include_conversations` | `bool` | `False` | 是否将原始对话片段合并进 `merged[]`（默认关闭，节省 token） |
-| `memory_type` | `str` | `None` | 过滤记忆类型（`fact`, `episodic`, `insight`, `general`） |
+| `memory_type` | `str` | `None` | 过滤记忆类型（`fact`, `episodic`, `trait`） |
 | `created_after` | `datetime` | `None` | 只返回该时间之后创建的记忆 |
 | `created_before` | `datetime` | `None` | 只返回该时间之前创建的记忆 |
 | `event_after` | `datetime` | `None` | 只返回事件时间在该时间之后的记忆 |
@@ -265,12 +267,14 @@ result = await nm.recall(
 
 ```python
 {
-    # 提取的记忆（fact / episodic / insight），按三因子评分排序
+    # 提取的记忆（fact / episodic / trait），按三因子评分排序
     "vector_results": [
         {
             "id": "uuid",
             "content": "在 Google 工作"  # fact: 无日期前缀；episodic: "2025-03-01: 去了北京. sentiment: excited",
-            "memory_type": "fact",              # fact / episodic / insight / general
+            "memory_type": "fact",              # fact / episodic / trait
+            "trait_type": None,                 # trait 专属: behavior / preference / core
+            "trait_stage": None,                # trait 专属: trend / candidate / emerging / established / core
             "metadata": {
                 "importance": 8,               # 重要性评分 (1-10)
                 "emotion": {
@@ -382,7 +386,7 @@ print(f"图检索: {len(result['graph_results'])} 条")
 
 ### digest() - 记忆整理
 
-专注于洞察生成和情感画像，基础记忆提取已由 `ingest()` 自动完成。
+专注于特质生成与升级、矛盾检测和情感画像，基础记忆提取已由 `ingest()` 自动完成。
 
 ```python
 result = await nm.digest(
@@ -402,11 +406,22 @@ result = await nm.digest(
 
 ```python
 {
-    "insights_generated": 2,          # 生成洞察数
-    "insights": [                     # 洞察内容
-        {"content": "用户是技术从业者，关注后端开发", "category": "pattern"},
-        {"content": "用户近期工作压力大，寻求减压方式", "category": "summary"},
+    "traits_generated": 2,            # 生成特质数
+    "traits": [                       # 特质内容
+        {
+            "content": "用户是技术从业者，关注后端开发",
+            "trait_type": "behavior",           # behavior / preference / core
+            "trait_stage": "emerging",          # trend / candidate / emerging / established / core
+            "confidence": 0.85,
+        },
+        {
+            "content": "用户近期工作压力大，倾向于独自消化",
+            "trait_type": "behavior",
+            "trait_stage": "candidate",
+            "confidence": 0.72,
+        },
     ],
+    "memories_analyzed": 50,          # 分析的记忆数
     "emotion_profile": {              # 情感画像
         "latest_state": "近期偏焦虑",
         "valence_avg": -0.3,
@@ -417,25 +432,31 @@ result = await nm.digest(
 
 **工作流程**：
 
-1. **提炼洞察**：分析近期记忆（已由 `ingest()` 提取），生成高层理解
-   - 行为模式（pattern）："用户倾向于晚上工作"
-   - 阶段总结（summary）："用户近期在准备跳槽"
-2. **更新画像**：整合情感数据，更新用户情感画像
+1. **9 步反思引擎**：分析近期记忆（已由 `ingest()` 提取），执行深度反思
+2. **特质生成**：从记忆中提炼用户特质（trait），包含三种子类型：
+   - behavior（行为模式）："用户倾向于晚上工作"
+   - preference（偏好）："偏好使用 Python 进行开发"
+   - core（核心特质）："对技术有强烈好奇心"
+3. **特质升级**：三层升级链 behavior → preference → core，随证据积累自动升级
+4. **特质阶段**：trend → candidate → emerging → established → core
+5. **矛盾检测**：检测新特质与已有特质的矛盾，记录 contradiction_count
+6. **证据质量评级**：通过 TraitEvidence 表独立存储证据，评估证据质量
+7. **更新画像**：整合情感数据，更新用户情感画像
 
 **示例**：
 
 ```python
-# 日常使用：ingest 自动提取 + 定期 digest 生成洞察
+# 日常使用：ingest 自动提取 + 定期 digest 生成特质
 await nm.ingest(user_id="alice", role="user", content="我在 Google 工作")
 # → 自动提取: fact: "在 Google 工作"
 
 # 定期调用 digest（如每天、每周）
 result = await nm.digest(user_id="alice")
 
-print(f"生成了 {result['insights_generated']} 条洞察")
+print(f"生成了 {result['traits_generated']} 条特质")
 
-for insight in result["insights"]:
-    print(f"[{insight['category']}] {insight['content']}")
+for trait in result["traits"]:
+    print(f"[{trait['trait_type']}/{trait['trait_stage']}] {trait['content']}")
 
 ```
 
@@ -1098,7 +1119,7 @@ async def main():
         # 3. 查询用户画像（自动提取后存入 profile）
         prefs = await nm.kv.get(user_id, "profile", "interests")
 
-        # 4. 定期生成洞察（默认 reflection_interval=20 自动触发，也可手动调用）
+        # 4. 定期生成特质（默认 reflection_interval=20 自动触发，也可手动调用）
         await nm.digest(user_id=user_id)
 
 asyncio.run(main())
@@ -1241,7 +1262,7 @@ result = await nm.stats(user_id: str) -> dict
 ```python
 {
     "total": 42,
-    "by_type": {"fact": 20, "episodic": 15, "insight": 7},
+    "by_type": {"fact": 20, "episodic": 15, "trait": 7},
     "by_week": [{"week": "2025-W01", "count": 5}, ...],
     "active_entities": 12,
     "profile_summary": {

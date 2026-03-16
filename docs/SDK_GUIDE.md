@@ -1,7 +1,8 @@
 # neuromem 使用指南
 
 > **Python 版本**: 3.12+
-> **最后更新**: 2026-02-24
+> **SDK 版本**: 0.11.x
+> **最后更新**: 2026-03-16
 
 ---
 
@@ -137,10 +138,11 @@ await nm.ingest(
 |------|------|------|
 | `fact` | 事实性知识 | "Python 是一种编程语言" |
 | `episodic` | 事件记录 | "昨天参加了项目会议" |
-| `insight` | 洞察（digest 生成） | "用户倾向于晚上工作" |
-| `general` | 通用 | 其他 |
+| `trait` | 用户特质（digest 生成） | "用户倾向于晚上工作" |
+| `document` | 文档记忆 | 上传文件提取的内容 |
 
-> **注**：用户偏好（如"喜欢喝咖啡"）由 LLM 自动提取后存入 profile（KV 存储），不作为独立记忆类型。
+> **trait 子类型**：behavior（行为模式）→ preference（偏好）→ core（核心特质），三层升级链。
+> **trait 阶段**：trend → candidate → emerging → established → core。
 
 ### 3.2 混合检索（recall）
 
@@ -450,7 +452,7 @@ await nm.ingest(
 )
 # → 自动提取: fact "在 Google 担任 ML 工程师", profile.interests 更新
 
-# digest 生成洞察（默认自动触发，也可手动调用）
+# digest 生成特质（默认自动触发，也可手动调用）
 result = await nm.digest(user_id="alice")
 ```
 
@@ -463,8 +465,9 @@ result = await nm.recall(user_id="alice", query="Where does Alice work?")
 
 # digest 返回
 {
-    "insights_generated": 1,      # 生成洞察数
-    "insights": [{"content": "...", "category": "pattern"}],
+    "traits_generated": 1,        # 生成特质数
+    "traits": [{"content": "...", "trait_type": "behavior", "trait_stage": "emerging", "confidence": 0.85}],
+    "memories_analyzed": 50,
     "emotion_profile": {...},
 }
 ```
@@ -655,7 +658,7 @@ result = await nm.recall(user_id="alice", query=user_input, limit=10)
 result["merged"]               # ⭐ 主要使用：vector + graph + conversation 去重合并，已按评分排序
 result["user_profile"]         # ⭐ 用户画像：occupation, interests, identity 等
 result["graph_context"]        # ⭐ 图谱三元组文本：["alice → WORKS_AT → google", ...]
-result["vector_results"]       # 提取的记忆（fact/episodic/insight），含评分
+result["vector_results"]       # 提取的记忆（fact/episodic/trait），含评分
 result["conversation_results"] # 原始对话片段，保留了日期细节
 result["graph_results"]        # 图谱原始三元组
 ```
@@ -666,14 +669,14 @@ result["graph_results"]        # 图谱原始三元组
 {"content": "在 Google 工作",                                       "memory_type": "fact",     "score": 0.82}
 # 情节记忆（episodic）：时间戳 = 事件发生的时间
 {"content": "2025-03-01: 压力很大，担心项目延期. sentiment: anxious", "memory_type": "episodic", "score": 0.75}
-# 洞察记忆（insight）：digest() 自动生成，无时间前缀
-{"content": "工作压力大时倾向于回避社交，独自消化",                   "memory_type": "insight",  "score": 0.68}
+# 特质记忆（trait）：digest() 自动生成，含 trait_type 和 trait_stage
+{"content": "工作压力大时倾向于回避社交，独自消化",                   "memory_type": "trait",    "score": 0.68}
 
 # 完整字段
 {
     "content": "...",                              # 格式化后的内容（含时间前缀）
     "source": "vector",                            # "vector" / "graph" / "conversation"
-    "memory_type": "fact",                         # fact / episodic / insight / graph_fact
+    "memory_type": "fact",                         # fact / episodic / trait / graph_fact
     "score": 0.646,                                # 综合评分（相关性 × 时效 × 重要性 × 图boost）
     "graph_boost": 1.5,                            # 图三元组覆盖度 boost（仅 source="vector" 时存在）
     "extracted_timestamp": "2025-03-01T00:00:00+00:00",  # 可用于时间排序
@@ -708,10 +711,10 @@ def build_system_prompt(recall_result: dict, user_input: str) -> str:
         profile_lines.append(f"兴趣：{profile['interests']}")
     profile_text = "\n".join(profile_lines) if profile_lines else "暂无"
 
-    # 2. merged 按类型分层：facts/insights 按相关性，episodes 按时间升序
+    # 2. merged 按类型分层：facts/traits 按相关性，episodes 按时间升序
     merged = recall_result.get("merged", [])
     facts    = [m for m in merged if m.get("memory_type") == "fact"][:5]
-    insights = [m for m in merged if m.get("memory_type") == "insight"][:3]
+    traits   = [m for m in merged if m.get("memory_type") == "trait"][:3]
     # 情节记忆按时间升序 → 完整时间线
     episodes = sorted(
         [m for m in merged if m.get("memory_type") == "episodic"],
@@ -737,8 +740,8 @@ def build_system_prompt(recall_result: dict, user_input: str) -> str:
 ## 事件时间线（按时间排序）
 {fmt(episodes)}
 
-## 对用户的深层理解（洞察）
-{fmt(insights)}
+## 对用户的深层理解（特质）
+{fmt(traits)}
 
 ## 结构化关系
 {graph_text}
@@ -754,10 +757,10 @@ def build_system_prompt(recall_result: dict, user_input: str) -> str:
 |------|------|
 | **一次 recall，完整上下文** | 一次 `recall()` 已包含 merged、profile、graph，无需额外查询 |
 | **profile 放 system prompt** | 职业、兴趣等稳定画像每次都要注入，是 agent 个性化的基础 |
-| **merged 按类型分层** | facts/insights 按相关性，episodes 按时间升序排列，呈现完整时间线 |
+| **merged 按类型分层** | facts/traits 按相关性，episodes 按时间升序排列，呈现完整时间线 |
 | **时间戳含义要说清** | fact 时间 = 用户提及时间；episodic 时间 = 事件发生时间；需在 prompt 中注明区别 |
 | **graph_context 补充结构化知识** | 向量检索可能遗漏"alice 在 Google 工作"这类关系，图谱能补充 |
-| **insight 自动包含** | 默认 `reflection_interval=20`，insight 自动进入 merged，无需额外调用 |
+| **trait 自动包含** | 默认 `reflection_interval=20`，trait 自动进入 merged，无需额外调用 |
 | **token 预算控制** | 每类记忆取 3-5 条，总记忆上下文建议 400-600 tokens |
 | **自然注入，不逐条引用** | system prompt 结尾提示 LLM"像朋友一样对话"，避免机械引用 |
 

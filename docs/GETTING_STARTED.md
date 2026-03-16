@@ -1,7 +1,7 @@
 # neuromem 快速开始指南
 
 > **预计时间**: 10 分钟
-> **最后更新**: 2026-02-24
+> **最后更新**: 2026-03-16
 
 ---
 
@@ -36,7 +36,7 @@ docker --version   # 20.0+
 neuromem 使用 PostgreSQL + pgvector 作为存储后端。提供了预配置的 Docker Compose 文件：
 
 ```bash
-git clone https://github.com/your-repo/neuromem.git
+git clone https://github.com/MatrixDriver/neuromem.git
 cd neuromem
 
 # 启动 PostgreSQL（含 pgvector 扩展）
@@ -287,7 +287,7 @@ async with NeuroMemory(
     database_url="...",
     embedding=SiliconFlowEmbedding(api_key="..."),
     llm=OpenAILLM(api_key="...", model="deepseek-chat"),
-    reflection_interval=20,  # 每 20 条消息后台自动 digest，生成洞察（默认值）
+    reflection_interval=20,  # 每 20 条消息后台自动 digest，生成特质（默认值）
 ) as nm:
     # ingest 自动提取记忆
     await nm.ingest(
@@ -417,4 +417,4 @@ pytest tests/ -v --timeout=30
 
 ---
 
-**需要帮助？** 提交 Issue: https://github.com/your-repo/neuromem/issues
+**需要帮助？** 提交 Issue: https://github.com/MatrixDriver/neuromem/issues

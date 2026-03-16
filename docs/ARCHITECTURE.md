@@ -1,6 +1,6 @@
 # neuromem 架构文档
 
-> **最后更新**: 2026-02-27
+> **最后更新**: 2026-03-16
 
 ---
 
@@ -61,7 +61,7 @@ neuromem 是一个 **Python 框架**（非 Client-Server），AI agent 开发者
 │  │  服务层 (neuromem/services/)                        │  │
 │  │  SearchService │ KVService │ ConversationService       │  │
 │  │  FileService │ GraphService │ MemoryExtractionService  │  │
-│  │  MemoryService │ FileProcessor                        │  │
+│  │  MemoryService │ TraitEngine │ ReflectionService       │  │
 │  └──────────────────────┬───────────────────────────────┘  │
 │                         │                                   │
 │  ┌──────────────────────▼───────────────────────────────┐  │
@@ -200,7 +200,7 @@ CREATE TABLE embeddings (
     user_id VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
     embedding vector(1024),  -- 维度由 Provider 决定
-    memory_type VARCHAR(50) DEFAULT 'general',
+    memory_type VARCHAR(50) DEFAULT 'fact',     -- fact / episodic / trait / document
     metadata_ JSONB,
     created_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ
@@ -303,6 +303,37 @@ CREATE TABLE graph_edges (
 
 图数据存储在 PostgreSQL 关系表中，通过 SQL 查询实现图遍历，无需 Apache AGE 或 Cypher。
 
+### 4.6 trait_evidence (特质证据)
+
+```sql
+CREATE TABLE trait_evidence (
+    id UUID PRIMARY KEY,
+    trait_id UUID REFERENCES embeddings(id),
+    evidence_content TEXT NOT NULL,
+    evidence_quality FLOAT,
+    source_memory_id UUID,
+    created_at TIMESTAMPTZ
+);
+```
+
+特质（trait）记忆的独立证据存储，支持证据质量评级和溯源。
+
+### 4.7 reflection_cycles (反思周期)
+
+```sql
+CREATE TABLE reflection_cycles (
+    id UUID PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    memories_analyzed INTEGER,
+    traits_generated INTEGER,
+    traits_upgraded INTEGER,
+    contradictions_detected INTEGER,
+    created_at TIMESTAMPTZ
+);
+```
+
+记录每次 `digest()` 反思的统计信息。
+
 ---
 
 ## 5. Provider 系统
@@ -387,7 +418,8 @@ nm = NeuroMemory(database_url="...", embedding=MyEmbedding())
 | `GraphService` | session | 图节点/边 CRUD |
 | `GraphMemoryService` | session | 图三元组存储/冲突检测/实体查询 |
 | `MemoryExtractionService` | session, embedding, llm | LLM 记忆分类提取 |
-| `ReflectionService` | session, embedding, llm | 洞察生成 + 情感画像更新 |
+| `TraitEngine` | session, embedding, llm | 特质生成、三层升级（behavior→preference→core）、矛盾检测、证据管理 |
+| `ReflectionService` | session, embedding, llm | 9 步反思引擎 + 特质生成 + 情感画像更新 |
 | `TemporalService` | session | 时序记忆与时间范围过滤 |
 
 ### 6.1 recall() 融合排序流程
@@ -486,22 +518,27 @@ recall(user_id, query)
 digest(user_id)
   │
   ├─ 💾 DB: 读取近期记忆 (默认 limit=50)
-  ├─ 💾 DB: 读取已有洞察 (用于去重)
+  ├─ 💾 DB: 读取已有特质 (用于去重和升级判断)
   │
-  ├─ 🔤 LLM: 调用 ReflectionService._generate_insights()
-  │     └─ LLMProvider.chat(洞察生成 prompt + 近期记忆列表)
-  │     └─ 返回: insights[] (pattern/summary 类型)
+  ├─ 🔤 LLM: 9 步反思引擎 (ReflectionService)
+  │     └─ LLMProvider.chat(反思 prompt + 近期记忆列表)
+  │     └─ 返回: traits[] (含 trait_type, trait_stage, confidence)
   │
-  ├─ 📐 Embedding: 为每条洞察生成向量
-  │     └─ EmbeddingProvider.embed(insight.content) × N
-  │     └─ 💾 DB: 存储到 embeddings (memory_type='insight')
+  ├─ — TraitEngine: 特质升级判断
+  │     └─ behavior → preference → core 三层升级链
+  │     └─ 矛盾检测 (contradiction_count)
+  │     └─ 证据质量评级 (TraitEvidence)
+  │
+  ├─ 📐 Embedding: 为每条特质生成向量
+  │     └─ EmbeddingProvider.embed(trait.content) × N
+  │     └─ 💾 DB: 存储到 embeddings (memory_type='trait')
   │
   └─ 🔤 LLM: 调用 ReflectionService._update_emotion_profile()
         └─ LLMProvider.chat(情感总结 prompt + 近期记忆情感标注)
         └─ 💾 DB: 更新 emotion_profiles 表
 ```
 
-**单次 digest 的 API 调用量**：2 次 LLM + N 次 Embedding（N = 生成的洞察条数）
+**单次 digest 的 API 调用量**：2 次 LLM + N 次 Embedding（N = 生成的特质条数）
 
 ### 7.5 API 调用汇总
 
